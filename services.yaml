@@ -1,0 +1,22 @@
+fetch_latest_recordings:
+  name: Fetch Latest Recordings
+  description: Fetches the latest recordings from all Reolink cameras and downloads them.
+  
+download_recording:
+  name: Download Recording
+  description: Downloads a specific recording from a Reolink camera.
+  fields:
+    camera_name:
+      name: Camera Name
+      description: Name of the camera to download from.
+      required: true
+      example: "Front door"
+      selector:
+        text:
+    entity_id:
+      name: Entity ID
+      description: Entity ID of the integration.
+      required: false
+      selector:
+        entity:
+          integration: reolink_recordings
