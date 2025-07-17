@@ -23,6 +23,7 @@ from .const import (
     DATA_COORDINATOR,
 )
 from .coordinator import ReolinkRecordingsCoordinator
+from .frontend import setup_frontend
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -74,6 +75,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Set up all platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    # Register frontend resources
+    setup_frontend(hass)
+    
     # Register services
     # await register_services(hass)
 

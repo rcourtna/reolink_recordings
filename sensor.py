@@ -90,10 +90,11 @@ class ReolinkRecordingSensor(CoordinatorEntity, SensorEntity):
                 if "error" in camera_data:
                     return None
                     
-                # Return timestamp as state
+                # Return timestamp and event type as state
                 timestamp = camera_data.get("timestamp", "Unknown")
                 date = camera_data.get("date", "Unknown")
-                return f"{date} {timestamp}"
+                event_type = camera_data.get("event_type", "Unknown")
+                return f"{date} {timestamp} - {event_type}"
                 
         return None
     
