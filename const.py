@@ -6,6 +6,8 @@ DOMAIN = "reolink_recordings"
 DEFAULT_SCAN_INTERVAL = 15  # minutes
 DEFAULT_STORAGE_PATH = "www/reolink_recordings"
 CONF_STORAGE_PATH = "storage_path"
+CONF_MEDIA_PLAYER = "media_player_entity"
+DEFAULT_MEDIA_PLAYER = "media_player.living_room_tv"
 
 # Snapshot format options
 CONF_SNAPSHOT_FORMAT = "snapshot_format"

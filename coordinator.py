@@ -21,6 +21,8 @@ from .const import (
     SNAPSHOT_FORMAT_JPG,
     SNAPSHOT_FORMAT_BOTH,
     DEFAULT_SNAPSHOT_FORMAT,
+    CONF_MEDIA_PLAYER,
+    DEFAULT_MEDIA_PLAYER,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -52,6 +54,10 @@ class ReolinkRecordingsCoordinator:
         self.data = {}
         self.recording_paths = {}
         
+        # Persistent mapping between camera indices and names
+        # This is the key to fixing the camera mixup issue
+        self.camera_index_map: Dict[int, str] = {}
+        
         # Maps for snapshot paths
         self.snapshot_paths: Dict[str, str] = {}  # GIF paths
         self.jpg_snapshot_paths: Dict[str, str] = {}  # JPG paths
@@ -61,6 +67,12 @@ class ReolinkRecordingsCoordinator:
         if entry and CONF_SNAPSHOT_FORMAT in entry.options:
             self.snapshot_format = entry.options[CONF_SNAPSHOT_FORMAT]
             _LOGGER.debug(f"Using snapshot format: {self.snapshot_format}")
+            
+        # Get media player entity preference or use default
+        self.media_player_entity = DEFAULT_MEDIA_PLAYER
+        if entry and CONF_MEDIA_PLAYER in entry.options:
+            self.media_player_entity = entry.options[CONF_MEDIA_PLAYER]
+            _LOGGER.debug(f"Using media player entity: {self.media_player_entity}")
         
         self._ws_id = 1
         # Listeners that wish to be notified when new data is available
@@ -115,7 +127,7 @@ class ReolinkRecordingsCoordinator:
         
         # Use the "media_player.browse_media" service to discover Reolink cameras
         # This is equivalent to the Python script's functionality but using HA's async methods
-        entity_id = "media_player.living_room_tv"  # Default entity that can browse media
+        entity_id = self.media_player_entity  # Use configurable media player entity
         
         # Browse the root Reolink media source
         reolink_root = "media-source://reolink"
@@ -127,9 +139,17 @@ class ReolinkRecordingsCoordinator:
         
         # Process each camera
         results = []
+        
+        # First, build or update the camera index mapping
+        # This ensures consistent camera identification across refreshes
         for i, camera in enumerate(root_result["children"]):
             camera_index = i
             camera_name = camera["title"]
+            
+            # Update our persistent camera mapping
+            self.camera_index_map[camera_index] = camera_name
+            _LOGGER.debug(f"Mapping camera index {camera_index} to name '{camera_name}'")
+            
             _LOGGER.debug(f"Processing camera: {camera_name} (index: {camera_index})")
             
             try:
@@ -220,6 +240,10 @@ class ReolinkRecordingsCoordinator:
         token = await self._get_auth_token()
         headers = {"Authorization": f"Bearer {token}"}
         
+        # Reverse lookup map to find camera index from name
+        # This is crucial for consistent file naming
+        name_to_index = {name: idx for idx, name in self.camera_index_map.items()}
+        
         for camera_data in cameras_data:
             camera_name = camera_data["camera"]
             
@@ -227,9 +251,19 @@ class ReolinkRecordingsCoordinator:
             if "error" in camera_data:
                 _LOGGER.warning(f"Skipping {camera_name}: {camera_data['error']}")
                 continue
+            
+            # Find the consistent camera name from our mapping
+            # If the camera name isn't in our mapping, use the name from the API as fallback
+            if camera_name in name_to_index:
+                camera_index = name_to_index[camera_name]
+                consistent_camera_name = self.camera_index_map[camera_index]
+                _LOGGER.debug(f"Using consistent name '{consistent_camera_name}' for camera '{camera_name}'")
+            else:
+                consistent_camera_name = camera_name
+                _LOGGER.warning(f"Camera '{camera_name}' not found in mapping, using name directly")
                 
             # Create a fixed filename for the latest recording from this camera
-            filename = f"{camera_name.replace(' ', '_').lower()}_latest.mp4"
+            filename = f"{consistent_camera_name.replace(' ', '_').lower()}_latest.mp4"
             
             # Full path for the recording
             dest_path = self.recordings_dir / filename
@@ -258,26 +292,33 @@ class ReolinkRecordingsCoordinator:
                 await self._download_file(url, headers, dest_path)
                 
                 # Record the video path in our mapping
+                # Store using both original and consistent camera names for reliability
                 self.recording_paths[camera_name] = str(dest_path)
+                if camera_name != consistent_camera_name:
+                    self.recording_paths[consistent_camera_name] = str(dest_path)
+                    _LOGGER.debug(f"Added additional mapping for consistent camera name '{consistent_camera_name}'")
 
                 # Generate snapshots based on selected format
                 try:
-                    camera_slug = camera_name.lower().replace(" ", "_")
+                    # Use the consistent camera name for snapshot filenames
+                    camera_slug = consistent_camera_name.lower().replace(" ", "_")
                     
                     # Create snapshots based on configured format
                     if self.snapshot_format in [SNAPSHOT_FORMAT_GIF, SNAPSHOT_FORMAT_BOTH]:
                         gif_path = self.recordings_dir / f"{camera_slug}_latest.gif"
                         await self._generate_gif_snapshot(dest_path, gif_path)
                         if gif_path.exists():
+                            # Store using original camera name for backward compatibility
                             self.snapshot_paths[camera_name] = str(gif_path)
-                            _LOGGER.debug(f"Generated animated GIF for {camera_name} at {gif_path}")
+                            _LOGGER.debug(f"Generated animated GIF for {consistent_camera_name} at {gif_path}")
                     
                     if self.snapshot_format in [SNAPSHOT_FORMAT_JPG, SNAPSHOT_FORMAT_BOTH]:
                         jpg_path = self.recordings_dir / f"{camera_slug}_latest.jpg"
                         await self._generate_jpg_snapshot(dest_path, jpg_path)
                         if jpg_path.exists():
+                            # Store using original camera name for backward compatibility
                             self.jpg_snapshot_paths[camera_name] = str(jpg_path)
-                            _LOGGER.debug(f"Generated JPG snapshot for {camera_name} at {jpg_path}")
+                            _LOGGER.debug(f"Generated JPG snapshot for {consistent_camera_name} at {jpg_path}")
                 except Exception as snap_err:
                     _LOGGER.warning(f"Could not generate snapshot(s) for {camera_name}: {snap_err}")
 
@@ -423,4 +464,10 @@ class ReolinkRecordingsCoordinator:
 
     async def async_request_refresh(self):
         """Request an immediate data refresh."""
-        await self.async_refresh()
+        # Only refresh if we don't already have data to avoid redundant downloads
+        if not self.data or "cameras" not in self.data or not self.data["cameras"]:
+            _LOGGER.debug("No existing data, performing full refresh")
+            await self.async_refresh()
+        else:
+            _LOGGER.debug("Using existing data, skipping redundant refresh")
+            return True
