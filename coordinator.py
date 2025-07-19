@@ -10,8 +10,18 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional
 
 from homeassistant.core import HomeAssistant
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_util
+
+from .const import (
+    DOMAIN,
+    CONF_SNAPSHOT_FORMAT,
+    SNAPSHOT_FORMAT_GIF,
+    SNAPSHOT_FORMAT_JPG,
+    SNAPSHOT_FORMAT_BOTH,
+    DEFAULT_SNAPSHOT_FORMAT,
+)
 
 _LOGGER = logging.getLogger(__name__)
 CHUNK_SIZE = 4 * 1024 * 1024  # 4 MiB
@@ -28,6 +38,7 @@ class ReolinkRecordingsCoordinator:
         username: str,
         password: str,
         storage_dir: Path,
+        entry: ConfigEntry = None,  # Added to support snapshot format options
     ):
         """Initialize the coordinator."""
         self.hass = hass
@@ -36,11 +47,21 @@ class ReolinkRecordingsCoordinator:
         self.username = username
         self.password = password
         self.storage_dir = storage_dir
+        self.entry = entry  # Store config entry for options access
         self.session = async_get_clientsession(hass)
         self.data = {}
         self.recording_paths = {}
-        # Map of camera name to snapshot jpg path
-        self.snapshot_paths: Dict[str, str] = {}
+        
+        # Maps for snapshot paths
+        self.snapshot_paths: Dict[str, str] = {}  # GIF paths
+        self.jpg_snapshot_paths: Dict[str, str] = {}  # JPG paths
+        
+        # Get snapshot format preference or use default
+        self.snapshot_format = DEFAULT_SNAPSHOT_FORMAT
+        if entry and CONF_SNAPSHOT_FORMAT in entry.options:
+            self.snapshot_format = entry.options[CONF_SNAPSHOT_FORMAT]
+            _LOGGER.debug(f"Using snapshot format: {self.snapshot_format}")
+        
         self._ws_id = 1
         # Listeners that wish to be notified when new data is available
         self._listeners: list[callable] = []
@@ -239,16 +260,26 @@ class ReolinkRecordingsCoordinator:
                 # Record the video path in our mapping
                 self.recording_paths[camera_name] = str(dest_path)
 
-                # Generate a snapshot (first frame) as JPEG for dashboard thumbnails
+                # Generate snapshots based on selected format
                 try:
                     camera_slug = camera_name.lower().replace(" ", "_")
-                    snapshot_path = self.recordings_dir / f"{camera_slug}_latest.jpg"
-                    await self._generate_snapshot(dest_path, snapshot_path)
-                    if snapshot_path.exists():
-                        self.snapshot_paths[camera_name] = str(snapshot_path)
-                        _LOGGER.debug(f"Generated snapshot for {camera_name} at {snapshot_path}")
+                    
+                    # Create snapshots based on configured format
+                    if self.snapshot_format in [SNAPSHOT_FORMAT_GIF, SNAPSHOT_FORMAT_BOTH]:
+                        gif_path = self.recordings_dir / f"{camera_slug}_latest.gif"
+                        await self._generate_gif_snapshot(dest_path, gif_path)
+                        if gif_path.exists():
+                            self.snapshot_paths[camera_name] = str(gif_path)
+                            _LOGGER.debug(f"Generated animated GIF for {camera_name} at {gif_path}")
+                    
+                    if self.snapshot_format in [SNAPSHOT_FORMAT_JPG, SNAPSHOT_FORMAT_BOTH]:
+                        jpg_path = self.recordings_dir / f"{camera_slug}_latest.jpg"
+                        await self._generate_jpg_snapshot(dest_path, jpg_path)
+                        if jpg_path.exists():
+                            self.jpg_snapshot_paths[camera_name] = str(jpg_path)
+                            _LOGGER.debug(f"Generated JPG snapshot for {camera_name} at {jpg_path}")
                 except Exception as snap_err:
-                    _LOGGER.warning(f"Could not generate snapshot for {camera_name}: {snap_err}")
+                    _LOGGER.warning(f"Could not generate snapshot(s) for {camera_name}: {snap_err}")
 
                 _LOGGER.info(f"Downloaded recording for {camera_name} to {dest_path}")
                 
@@ -313,15 +344,34 @@ class ReolinkRecordingsCoordinator:
         enc = urllib.parse.quote(media_id, safe="")
         return f"{self.host}/api/media_source/proxy/{enc}"
 
-    async def _generate_snapshot(self, video_path: Path, snapshot_path: Path):
-        """Generate a JPG snapshot from the first frame of the video using ffmpeg."""
+    async def _generate_gif_snapshot(self, video_path: Path, snapshot_path: Path):
+        """Generate an animated GIF from the video using ffmpeg."""
         import subprocess, shlex
 
-        cmd = f"ffmpeg -y -i {shlex.quote(str(video_path))} -frames:v 1 {shlex.quote(str(snapshot_path))}"
+        # Generate animated GIF with optimized settings:
+        # - Scale to max 320px width to keep file size reasonable
+        # - Use fps=2 for smooth animation without being too large
+        # - Use palettegen for better quality
+        # - Limit to first 10 seconds of video to keep GIF size manageable
+        cmd = f"ffmpeg -y -t 10 -i {shlex.quote(str(video_path))} -vf \"fps=2,scale=320:-1:flags=lanczos,palettegen\" -f image2 /tmp/palette.png && ffmpeg -y -t 10 -i {shlex.quote(str(video_path))} -i /tmp/palette.png -filter_complex \"fps=2,scale=320:-1:flags=lanczos[x];[x][1:v]paletteuse\" {shlex.quote(str(snapshot_path))}"
         proc = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
         await proc.communicate()
         if proc.returncode != 0:
-            raise RuntimeError("ffmpeg failed to generate snapshot")
+            raise RuntimeError("ffmpeg failed to generate animated GIF")
+    
+    async def _generate_jpg_snapshot(self, video_path: Path, snapshot_path: Path):
+        """Generate a single JPG snapshot from the video using ffmpeg.
+        
+        This is a much less CPU-intensive operation than generating an animated GIF.
+        """
+        import subprocess, shlex
+        
+        # Generate a single frame JPG snapshot from the middle of the first 10 seconds
+        cmd = f"ffmpeg -y -ss 5 -t 1 -i {shlex.quote(str(video_path))} -vframes 1 -q:v 2 -vf scale=320:-1 {shlex.quote(str(snapshot_path))}"
+        proc = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+        await proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError("ffmpeg failed to generate JPG snapshot")
 
     async def _download_file(self, url: str, headers: Dict[str, str], dest_path: Path):
         """Download a file from a URL and save it to the destination path."""

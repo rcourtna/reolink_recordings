@@ -20,6 +20,11 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     CONF_STORAGE_PATH,
     DEFAULT_STORAGE_PATH,
+    CONF_SNAPSHOT_FORMAT,
+    DEFAULT_SNAPSHOT_FORMAT,
+    SNAPSHOT_FORMAT_GIF,
+    SNAPSHOT_FORMAT_JPG,
+    SNAPSHOT_FORMAT_BOTH,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -104,6 +109,16 @@ class ReolinkRecordingsOptionsFlow(config_entries.OptionsFlow):
                     CONF_STORAGE_PATH, DEFAULT_STORAGE_PATH
                 ),
             ): str,
+            vol.Optional(
+                CONF_SNAPSHOT_FORMAT,
+                default=self.config_entry.options.get(
+                    CONF_SNAPSHOT_FORMAT, DEFAULT_SNAPSHOT_FORMAT
+                ),
+            ): vol.In([
+                SNAPSHOT_FORMAT_GIF,
+                SNAPSHOT_FORMAT_JPG,
+                SNAPSHOT_FORMAT_BOTH
+            ]),
         }
 
         return self.async_show_form(step_id="init", data_schema=vol.Schema(options))

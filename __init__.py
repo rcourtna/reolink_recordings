@@ -54,6 +54,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         username,
         password,
         storage_dir,
+        entry=entry,  # Pass the entire config entry for access to options
     )
 
     # Do initial data fetch

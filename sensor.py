@@ -11,7 +11,15 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, DATA_COORDINATOR
+from .const import (
+    DOMAIN,
+    DATA_COORDINATOR,
+    CONF_SNAPSHOT_FORMAT,
+    SNAPSHOT_FORMAT_GIF,
+    SNAPSHOT_FORMAT_JPG,
+    SNAPSHOT_FORMAT_BOTH,
+    DEFAULT_SNAPSHOT_FORMAT,
+)
 from .coordinator import ReolinkRecordingsCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -74,7 +82,13 @@ class ReolinkRecordingSensor(CoordinatorEntity, SensorEntity):
         
         # Fixed filenames for latest assets
         self._video_filename = f"{self._camera_slug}_latest.mp4"
-        self._snapshot_filename = f"{self._camera_slug}_latest.jpg"
+        self._gif_snapshot_filename = f"{self._camera_slug}_latest.gif"
+        self._jpg_snapshot_filename = f"{self._camera_slug}_latest.jpg"
+        
+        # Get the snapshot format configuration
+        self._snapshot_format = coordinator.entry.options.get(
+            CONF_SNAPSHOT_FORMAT, DEFAULT_SNAPSHOT_FORMAT
+        )
     
     @property
     def available(self) -> bool:
@@ -124,12 +138,37 @@ class ReolinkRecordingSensor(CoordinatorEntity, SensorEntity):
                         # Media URL (MP4) for tap-to-play - using /local/ URL via symlink
                         attributes["media_url"] = f"/local/reolink_recordings/recordings/{self._video_filename}?t={timestamp}"
 
-                        # Prefer snapshot image for entity_picture if generated
-                        snapshot_path = getattr(self.coordinator, "snapshot_paths", {}).get(self.camera_name)
-                        if snapshot_path:
-                            picture_url = f"/local/reolink_recordings/recordings/{self._snapshot_filename}?t={timestamp}"
+                        # Select the appropriate snapshot image based on configuration
+                        gif_path = getattr(self.coordinator, "snapshot_paths", {}).get(self.camera_name)
+                        jpg_path = getattr(self.coordinator, "jpg_snapshot_paths", {}).get(self.camera_name)
+                        
+                        # Choose which snapshot to use for entity_picture
+                        if self._snapshot_format == SNAPSHOT_FORMAT_GIF and gif_path:
+                            # Use GIF if configured for GIF only
+                            picture_url = f"/local/reolink_recordings/recordings/{self._gif_snapshot_filename}?t={timestamp}"
                             attributes["entity_picture"] = picture_url
                             self._attr_entity_picture = picture_url
+                        elif self._snapshot_format == SNAPSHOT_FORMAT_JPG and jpg_path:
+                            # Use JPG if configured for JPG only
+                            picture_url = f"/local/reolink_recordings/recordings/{self._jpg_snapshot_filename}?t={timestamp}"
+                            attributes["entity_picture"] = picture_url
+                            self._attr_entity_picture = picture_url
+                        elif self._snapshot_format == SNAPSHOT_FORMAT_BOTH:
+                            # If both, prefer GIF for entity_picture but include JPG as alternate_picture
+                            if gif_path:
+                                gif_url = f"/local/reolink_recordings/recordings/{self._gif_snapshot_filename}?t={timestamp}"
+                                attributes["entity_picture"] = gif_url
+                                self._attr_entity_picture = gif_url
+                                
+                                # If we also have a JPG, add it as an alternate
+                                if jpg_path:
+                                    jpg_url = f"/local/reolink_recordings/recordings/{self._jpg_snapshot_filename}?t={timestamp}"
+                                    attributes["jpg_picture"] = jpg_url
+                            elif jpg_path:
+                                # Fall back to JPG if GIF not available but we wanted both
+                                jpg_url = f"/local/reolink_recordings/recordings/{self._jpg_snapshot_filename}?t={timestamp}"
+                                attributes["entity_picture"] = jpg_url
+                                self._attr_entity_picture = jpg_url
                         else:
                             # Fallback to using the mp4 (may not render in picture card)
                             picture_url = f"/media-source/{DOMAIN}/{self._video_filename}?t={timestamp}"
