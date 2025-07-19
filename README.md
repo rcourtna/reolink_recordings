@@ -10,6 +10,8 @@ A custom component that fetches and downloads the latest recordings from your Re
 - Uses fixed filenames for latest recordings to simplify dashboard usage
 - Enables auto-refreshing images on your dashboard
 - Provides tap-to-expand functionality for quick viewing
+- Generates high-quality animated GIF previews (640px width) and JPG snapshots (1024px width)
+- Intelligent caching system to avoid redundant downloads of identical recordings
 - Prepares downloaded recordings for future AI processing
 - Periodic update of recordings (configurable interval)
 
@@ -42,6 +44,9 @@ A custom component that fetches and downloads the latest recordings from your Re
 After setup, you can adjust these options:
 - Scan Interval: How often to check for new recordings (in minutes)
 - Storage Path: Where to store downloaded recordings (should be set to `www/reolink_recordings` for proper functionality)
+- Snapshot Format: Choose between animated GIF, static JPG, or both for snapshots
+- Enable Caching: Toggle the caching system on/off (useful to disable during development/debugging)
+- Media Player Entity: The entity ID of the media player to use for browsing Reolink media sources
 
 ## Usage
 
@@ -112,6 +117,30 @@ tap_action:
 
 This will open the recording in your browser when tapped.
 
+#### Method 4: Using the Custom Reolink Recording Card (Best Experience)
+
+A custom Lovelace card has been created specifically for this integration:
+
+1. Copy the `reolink-recording-card.js` file to your `www` directory
+2. Add it as a resource in your Lovelace configuration:
+   - Go to Settings → Dashboards → Resources
+   - Add `/local/reolink-recording-card.js` as a JavaScript module
+3. Add the card to your dashboard:
+
+```yaml
+type: custom:reolink-recording-card
+entity: sensor.front_door_latest_recording
+refresh_interval: 60
+show_state: true
+```
+
+Features:
+- Auto-refreshes camera snapshots with configurable interval
+- Cache-busting to ensure fresh images
+- Clickable to open MP4 video in new tab
+- Shows camera state information and recording details
+- Hover effects with play overlay icon
+
 ### Services
 
 The integration provides these services:
@@ -128,4 +157,11 @@ Parameters:
 
 ## Viewing Recordings
 
-All recordings are stored in the `www/reolink_recordings/recordings` directory and can be accessed via `/local/reolink_recordings/recordings/` URLs. Each camera has fixed filenames for the latest recording (`camera_name_latest.mp4`) and snapshot (`camera_name_latest.jpg`) for easy reference in dashboards.
+All recordings are stored in the `www/reolink_recordings/recordings` directory and can be accessed via `/local/reolink_recordings/recordings/` URLs. Each camera has fixed filenames for the latest recording (`camera_name_latest.mp4`), animated preview (`camera_name_latest.gif`), and snapshot (`camera_name_latest.jpg`) for easy reference in dashboards.
+
+## Performance Optimizations
+
+### Caching System
+The integration includes an intelligent caching system that avoids redundant downloads of identical recordings. Each recording is assigned a unique ID based on camera index, timestamp, event type, and duration. When a recording with the same ID is detected, the download is skipped, reducing network traffic and CPU usage.
+
+You can disable caching in the integration options when debugging or developing new features.

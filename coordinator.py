@@ -17,11 +17,15 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     DOMAIN,
+    CONF_STORAGE_PATH,
+    DEFAULT_STORAGE_PATH,
     CONF_SNAPSHOT_FORMAT,
     SNAPSHOT_FORMAT_GIF,
     SNAPSHOT_FORMAT_JPG,
     SNAPSHOT_FORMAT_BOTH,
     DEFAULT_SNAPSHOT_FORMAT,
+    CONF_ENABLE_CACHING,
+    DEFAULT_ENABLE_CACHING,
     CONF_MEDIA_PLAYER,
     DEFAULT_MEDIA_PLAYER,
 )
@@ -54,6 +58,8 @@ class ReolinkRecordingsCoordinator:
         self.session = async_get_clientsession(hass)
         self.data = {}
         self.recording_paths = {}
+        # Cache to store recording metadata for comparison
+        self.recording_cache = {}
         
         # Persistent mapping between camera indices and names
         # This is the key to fixing the camera mixup issue
@@ -75,6 +81,12 @@ class ReolinkRecordingsCoordinator:
             self.media_player_entity = entry.options[CONF_MEDIA_PLAYER]
             _LOGGER.debug(f"Using media player entity: {self.media_player_entity}")
         
+        # Get caching preference or use default
+        self.enable_caching = DEFAULT_ENABLE_CACHING
+        if entry and CONF_ENABLE_CACHING in entry.options:
+            self.enable_caching = entry.options[CONF_ENABLE_CACHING]
+            _LOGGER.debug(f"Caching enabled: {self.enable_caching}")
+        
         self._ws_id = 1
         # Listeners that wish to be notified when new data is available
         self._listeners: list[callable] = []
@@ -86,6 +98,9 @@ class ReolinkRecordingsCoordinator:
         # Ensure recordings directory exists
         self.recordings_dir = storage_dir / "recordings"
         os.makedirs(self.recordings_dir, exist_ok=True)
+        
+        # Now that directories are created, load cached metadata
+        self._load_cached_metadata()
 
     async def async_refresh(self, *_):
         """Refresh data from Reolink cameras."""
@@ -261,6 +276,10 @@ class ReolinkRecordingsCoordinator:
         timestamp = title_parts[0] if len(title_parts) > 0 else "Unknown"
         event_type = title_parts[1] if len(title_parts) > 1 else "Unknown"
         
+        # Create a unique identifier for this recording
+        # This will be used to determine if we already have this recording
+        recording_id = f"{camera_index}_{timestamp}_{event_type}_{latest_recording.get('duration', 'Unknown')}"
+        
         # Return the recording details
         return {
             "camera": camera_name,
@@ -271,6 +290,7 @@ class ReolinkRecordingsCoordinator:
             "duration": latest_recording.get("duration", "Unknown"),
             "media_content_id": latest_recording["media_content_id"],
             "media_content_type": latest_recording["media_content_type"],
+            "recording_id": recording_id,  # Add unique identifier
         }
 
     async def _download_recordings(self, cameras_data: List[Dict[str, Any]]):
@@ -299,7 +319,32 @@ class ReolinkRecordingsCoordinator:
             else:
                 consistent_camera_name = camera_name
                 _LOGGER.warning(f"No camera_index in data for '{camera_name}', using name directly")
-                
+            
+            # Check if we already have this exact recording
+            recording_id = camera_data.get("recording_id")
+            cached_recording = self.recording_cache.get(consistent_camera_name)
+            
+            # Check if we would normally skip this download due to caching
+            if recording_id and cached_recording and recording_id == cached_recording["recording_id"]:
+                if self.enable_caching:
+                    _LOGGER.info(f"Skipping download for {camera_name} - already have the same recording (ID: {recording_id})")
+                    
+                    # Update the data structures with existing paths
+                    if consistent_camera_name in self.recording_paths:
+                        # Record the video path in our mapping for reliability
+                        self.recording_paths[camera_name] = self.recording_paths[consistent_camera_name]
+                        
+                        # Update snapshot paths if they exist
+                        if consistent_camera_name in self.snapshot_paths:
+                            self.snapshot_paths[camera_name] = self.snapshot_paths[consistent_camera_name]
+                        if consistent_camera_name in self.jpg_snapshot_paths:
+                            self.jpg_snapshot_paths[camera_name] = self.jpg_snapshot_paths[consistent_camera_name]
+                            
+                    continue
+                else:
+                    _LOGGER.info(f"Caching disabled - re-downloading recording for {camera_name} (ID: {recording_id})")
+                    # Continue with download even though we have the same recording
+            
             # Create a fixed filename for the latest recording from this camera
             filename = f"{consistent_camera_name.replace(' ', '_').lower()}_latest.mp4"
             
@@ -337,6 +382,16 @@ class ReolinkRecordingsCoordinator:
                 if camera_name != consistent_camera_name:
                     self.recording_paths[consistent_camera_name] = str(dest_path)
                     _LOGGER.debug(f"Added additional mapping for consistent camera name '{consistent_camera_name}'")
+                
+                # Store the recording metadata in our cache
+                if recording_id:
+                    self.recording_cache[consistent_camera_name] = {
+                        "recording_id": recording_id,
+                        "timestamp": camera_data.get("timestamp"),
+                        "event_type": camera_data.get("event_type"),
+                        "duration": camera_data.get("duration"),
+                        "path": str(dest_path)
+                    }
 
                 # Generate snapshots based on selected format
                 try:
@@ -350,6 +405,7 @@ class ReolinkRecordingsCoordinator:
                         if gif_path.exists():
                             # Store using original camera name for backward compatibility
                             self.snapshot_paths[camera_name] = str(gif_path)
+                            self.snapshot_paths[consistent_camera_name] = str(gif_path)
                             _LOGGER.debug(f"Generated animated GIF for {consistent_camera_name} at {gif_path}")
                     
                     if self.snapshot_format in [SNAPSHOT_FORMAT_JPG, SNAPSHOT_FORMAT_BOTH]:
@@ -358,6 +414,7 @@ class ReolinkRecordingsCoordinator:
                         if jpg_path.exists():
                             # Store using original camera name for backward compatibility
                             self.jpg_snapshot_paths[camera_name] = str(jpg_path)
+                            self.jpg_snapshot_paths[consistent_camera_name] = str(jpg_path)
                             _LOGGER.debug(f"Generated JPG snapshot for {consistent_camera_name} at {jpg_path}")
                 except Exception as snap_err:
                     _LOGGER.warning(f"Could not generate snapshot(s) for {camera_name}: {snap_err}")
@@ -521,6 +578,7 @@ class ReolinkRecordingsCoordinator:
         metadata = {
             "last_update": self.data.get("last_update"),
             "recordings": self.recording_paths,
+            "recording_cache": self.recording_cache,  # Save cache for persistence between restarts
         }
         
         with open(metadata_file, "w") as f:
@@ -531,6 +589,29 @@ class ReolinkRecordingsCoordinator:
         result = self._ws_id
         self._ws_id += 1
         return result
+        
+    def _load_cached_metadata(self):
+        """Load cached metadata from file if it exists."""
+        metadata_file = self.metadata_dir / "recordings.json"
+        
+        if metadata_file.exists():
+            try:
+                with open(metadata_file, "r") as f:
+                    metadata = json.load(f)
+                
+                # Restore recording cache if available
+                if "recording_cache" in metadata:
+                    self.recording_cache = metadata["recording_cache"]
+                    _LOGGER.debug(f"Loaded recording cache with {len(self.recording_cache)} entries")
+                    
+                # Restore recording paths if available
+                if "recordings" in metadata:
+                    self.recording_paths = metadata["recordings"]
+                    _LOGGER.debug(f"Loaded recording paths with {len(self.recording_paths)} entries")
+            except Exception as e:
+                _LOGGER.warning(f"Error loading cached metadata: {e}")
+                # Initialize empty cache if loading fails
+                self.recording_cache = {}
 
     # ------------------------------------------------------------------
     # Listener helpers so entities derived from CoordinatorEntity work
