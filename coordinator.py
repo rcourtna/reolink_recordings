@@ -458,11 +458,11 @@ class ReolinkRecordingsCoordinator:
         import subprocess, shlex
 
         # Generate animated GIF with optimized settings:
-        # - Scale to max 320px width to keep file size reasonable
+        # - Scale to max 640px width for better quality while keeping file size reasonable
         # - Use fps=2 for smooth animation without being too large
-        # - Use palettegen for better quality
+        # - Use palettegen for better quality with dithering
         # - Limit to first 10 seconds of video to keep GIF size manageable
-        cmd = f"ffmpeg -y -t 10 -i {shlex.quote(str(video_path))} -vf \"fps=2,scale=320:-1:flags=lanczos,palettegen\" -f image2 /tmp/palette.png && ffmpeg -y -t 10 -i {shlex.quote(str(video_path))} -i /tmp/palette.png -filter_complex \"fps=2,scale=320:-1:flags=lanczos[x];[x][1:v]paletteuse\" {shlex.quote(str(snapshot_path))}"
+        cmd = f"ffmpeg -y -t 10 -i {shlex.quote(str(video_path))} -vf \"fps=2,scale=640:-1:flags=lanczos,palettegen=max_colors=256:stats_mode=diff\" -f image2 /tmp/palette.png && ffmpeg -y -t 10 -i {shlex.quote(str(video_path))} -i /tmp/palette.png -filter_complex \"fps=2,scale=640:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5\" {shlex.quote(str(snapshot_path))}"
         proc = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
         await proc.communicate()
         if proc.returncode != 0:
@@ -476,7 +476,8 @@ class ReolinkRecordingsCoordinator:
         import subprocess, shlex
         
         # Generate a single frame JPG snapshot from the middle of the first 10 seconds
-        cmd = f"ffmpeg -y -ss 5 -t 1 -i {shlex.quote(str(video_path))} -vframes 1 -q:v 2 -vf scale=320:-1 {shlex.quote(str(snapshot_path))}"
+        # Using higher resolution (1024px width) and maximum quality (-q:v 1)
+        cmd = f"ffmpeg -y -ss 5 -t 1 -i {shlex.quote(str(video_path))} -vframes 1 -q:v 1 -vf scale=1024:-1 {shlex.quote(str(snapshot_path))}"
         proc = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
         await proc.communicate()
         if proc.returncode != 0:
