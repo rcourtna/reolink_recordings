@@ -5,6 +5,7 @@ import json
 import asyncio
 import aiohttp
 import websockets
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
@@ -140,18 +141,44 @@ class ReolinkRecordingsCoordinator:
         # Process each camera
         results = []
         
-        # First, build or update the camera index mapping
-        # This ensures consistent camera identification across refreshes
-        for i, camera in enumerate(root_result["children"]):
-            camera_index = i
+        # Extract camera name to index mapping from media content IDs
+        _LOGGER.info(f"Discovering cameras and extracting reliable camera mappings")
+        camera_name_to_index = {}
+        
+        for camera in root_result["children"]:
             camera_name = camera["title"]
-            
-            # Update our persistent camera mapping
+            # Extract actual camera index from media_content_id
+            # Format is typically: media-source://reolink/CAM|{nvr_id}|{camera_index}
+            try:
+                # Parse the media_content_id to extract the actual camera index
+                content_id_parts = camera["media_content_id"].split("|")
+                if len(content_id_parts) >= 3:
+                    # The third part should contain the actual camera index
+                    actual_camera_index = int(content_id_parts[2])
+                    camera_name_to_index[camera_name] = actual_camera_index
+                    _LOGGER.info(f"Extracted camera index {actual_camera_index} for camera '{camera_name}' from content ID")
+                else:
+                    _LOGGER.warning(f"Couldn't parse index from media_content_id: {camera['media_content_id']}")
+            except (ValueError, IndexError) as e:
+                _LOGGER.warning(f"Error extracting camera index for {camera_name}: {str(e)}")
+        
+        # Update our persistent camera mapping with the actual indices
+        self.camera_index_map.clear()
+        for camera_name, camera_index in camera_name_to_index.items():
             self.camera_index_map[camera_index] = camera_name
-            _LOGGER.debug(f"Mapping camera index {camera_index} to name '{camera_name}'")
             
+        _LOGGER.info(f"Camera mapping complete: {self.camera_index_map}")
+        
+        # Process each camera using the correct indices
+        for camera in root_result["children"]:
+            camera_name = camera["title"]
+            camera_index = camera_name_to_index.get(camera_name)
+            if camera_index is None:
+                _LOGGER.warning(f"No index mapping found for camera: {camera_name}, skipping")
+                continue
+                
             _LOGGER.debug(f"Processing camera: {camera_name} (index: {camera_index})")
-            
+                
             try:
                 result = await self._get_latest_recording(entity_id, camera_index, camera_name, token)
                 results.append(result)
@@ -169,7 +196,18 @@ class ReolinkRecordingsCoordinator:
     ) -> Dict[str, Any]:
         """Get the latest recording for a specific camera index."""
         # Step 1: Get camera resolution options
-        camera_path = f"media-source://reolink/CAM|01JZW5GP7HJAVQNQXD498N4SKV|{camera_index}"
+        # Extract NVR ID from the media_content_id for consistent use
+        nvr_id = "01JZW5GP7HJAVQNQXD498N4SKV"  # Default fallback
+        try:
+            # Get the NVR ID from an existing media content ID if possible
+            for child in self.hass.data.get(DOMAIN, {}).get("nvr_entities", []):
+                if hasattr(child, "media_content_id") and "|" in child.media_content_id:
+                    nvr_id = child.media_content_id.split("|")[1]
+                    break
+        except Exception as e:
+            _LOGGER.debug(f"Couldn't extract NVR ID from existing entities: {e}")
+            
+        camera_path = f"media-source://reolink/CAM|{nvr_id}|{camera_index}"
         camera_result = await self._browse_media(entity_id, camera_path, token, "playlist")
         
         # Step 2: Get the highest resolution option (main)
@@ -218,31 +256,27 @@ class ReolinkRecordingsCoordinator:
         
         latest_recording = recordings[0]
         
-        # Extract timestamp and duration from the title
-        # Format is typically: "HH:MM:SS D:DD:DD Type"
-        title_parts = latest_recording["title"].split()
+        # Extract recording details
+        title_parts = latest_recording["title"].split(" ")
         timestamp = title_parts[0] if len(title_parts) > 0 else "Unknown"
-        duration = title_parts[1] if len(title_parts) > 1 else "Unknown"
-        event_type = " ".join(title_parts[2:]) if len(title_parts) > 2 else "Unknown"
+        event_type = title_parts[1] if len(title_parts) > 1 else "Unknown"
         
+        # Return the recording details
         return {
             "camera": camera_name,
+            "camera_index": camera_index,  # Include the camera index for consistent mapping
             "date": latest_date["title"],
             "timestamp": timestamp,
-            "duration": duration,
             "event_type": event_type,
+            "duration": latest_recording.get("duration", "Unknown"),
             "media_content_id": latest_recording["media_content_id"],
-            "can_play": latest_recording.get("can_play", False)
+            "media_content_type": latest_recording["media_content_type"],
         }
 
     async def _download_recordings(self, cameras_data: List[Dict[str, Any]]):
         """Download recordings for each camera."""
         token = await self._get_auth_token()
         headers = {"Authorization": f"Bearer {token}"}
-        
-        # Reverse lookup map to find camera index from name
-        # This is crucial for consistent file naming
-        name_to_index = {name: idx for idx, name in self.camera_index_map.items()}
         
         for camera_data in cameras_data:
             camera_name = camera_data["camera"]
@@ -252,15 +286,19 @@ class ReolinkRecordingsCoordinator:
                 _LOGGER.warning(f"Skipping {camera_name}: {camera_data['error']}")
                 continue
             
-            # Find the consistent camera name from our mapping
-            # If the camera name isn't in our mapping, use the name from the API as fallback
-            if camera_name in name_to_index:
-                camera_index = name_to_index[camera_name]
-                consistent_camera_name = self.camera_index_map[camera_index]
-                _LOGGER.debug(f"Using consistent name '{consistent_camera_name}' for camera '{camera_name}'")
+            # Use the camera_index directly from the camera data
+            # This ensures we're using the same index that was used to fetch the recording
+            if "camera_index" in camera_data:
+                camera_index = camera_data["camera_index"]
+                if camera_index in self.camera_index_map:
+                    consistent_camera_name = self.camera_index_map[camera_index]
+                    _LOGGER.debug(f"Using consistent name '{consistent_camera_name}' for camera '{camera_name}' with index {camera_index}")
+                else:
+                    consistent_camera_name = camera_name
+                    _LOGGER.warning(f"Camera index {camera_index} not found in mapping, using name directly")
             else:
                 consistent_camera_name = camera_name
-                _LOGGER.warning(f"Camera '{camera_name}' not found in mapping, using name directly")
+                _LOGGER.warning(f"No camera_index in data for '{camera_name}', using name directly")
                 
             # Create a fixed filename for the latest recording from this camera
             filename = f"{consistent_camera_name.replace(' ', '_').lower()}_latest.mp4"
@@ -276,6 +314,8 @@ class ReolinkRecordingsCoordinator:
                     _LOGGER.debug(f"Removed previous recording file: {filename}")
                 except Exception as e:
                     _LOGGER.error(f"Error removing old file {dest_path}: {e}")
+                    
+            _LOGGER.info(f"Downloading recording for camera '{consistent_camera_name}' (index: {camera_data.get('camera_index', 'unknown')}) to {filename}")
             
             # Get the media content ID
             media_id = camera_data["media_content_id"]
@@ -348,36 +388,64 @@ class ReolinkRecordingsCoordinator:
             "media_content_type": media_content_type
         }
         
+        _LOGGER.debug(f"API REQUEST to {url}")
+        _LOGGER.debug(f"Request data: {json.dumps(data)}")
+        
         async with self.session.post(url, json=data, headers=headers) as response:
             response.raise_for_status()
             result = await response.json()
-            return result["service_response"][entity_id]
+            _LOGGER.debug(f"API RESPONSE status: {response.status}")
+            _LOGGER.debug(f"Response keys: {list(result.keys())}")
+            if "service_response" in result and entity_id in result["service_response"]:
+                response_data = result["service_response"][entity_id]
+                _LOGGER.debug(f"Media browse response for {media_content_id}: {json.dumps(response_data)[:500]}...")
+                return response_data
+            else:
+                _LOGGER.error(f"Invalid response format: {json.dumps(result)[:500]}...")
+                raise ValueError(f"Invalid response format from media_player.browse_media service")
 
     async def _ws_resolve(self, media_id: str, token: str) -> str:
         """Use the WebSocket API to resolve a media_content_id to a proxy URL."""
         ws_url = f"{self.host}/api/websocket".replace("http", "ws", 1)
         
+        _LOGGER.debug(f"WebSocket connecting to {ws_url}")
+        
         async with websockets.connect(ws_url) as websocket:
             auth_msg = await websocket.recv()  # hello message
-            await websocket.send(json.dumps({"type": "auth", "access_token": token}))
+            _LOGGER.debug(f"WebSocket hello message: {auth_msg}")
+            
+            auth_request = {"type": "auth", "access_token": token}
+            _LOGGER.debug(f"WebSocket auth request: {json.dumps(auth_request)}")
+            await websocket.send(json.dumps(auth_request))
+            
             auth_result = json.loads(await websocket.recv())
+            _LOGGER.debug(f"WebSocket auth response: {json.dumps(auth_result)}")
             
             if auth_result["type"] != "auth_ok":
+                _LOGGER.error(f"WebSocket authentication failed: {json.dumps(auth_result)}")
                 raise RuntimeError("WebSocket authentication failed")
             
             msg_id = self._get_next_ws_id()
-            await websocket.send(json.dumps({
+            resolve_request = {
                 "id": msg_id,
                 "type": "media_source/resolve_media",
                 "media_content_id": media_id
-            }))
+            }
+            _LOGGER.debug(f"WebSocket resolve request: {json.dumps(resolve_request)}")
+            await websocket.send(json.dumps(resolve_request))
             
             response = json.loads(await websocket.recv())
+            _LOGGER.debug(f"WebSocket resolve response: {json.dumps(response)}")
+            
             if response.get("success") is False:
-                raise RuntimeError(f"Failed to resolve media: {response.get('error', {}).get('message', 'Unknown error')}")
+                error_msg = response.get('error', {}).get('message', 'Unknown error')
+                _LOGGER.error(f"Failed to resolve media: {error_msg}")
+                raise RuntimeError(f"Failed to resolve media: {error_msg}")
             
             result = response.get("result", {})
-            return f"{self.host}{result.get('url', '')}"
+            resolved_url = f"{self.host}{result.get('url', '')}"
+            _LOGGER.debug(f"Resolved media URL: {resolved_url}")
+            return resolved_url
 
     def _proxy_url(self, media_id: str) -> str:
         """Get the direct proxy URL for a media_content_id."""
@@ -419,13 +487,31 @@ class ReolinkRecordingsCoordinator:
         # Ensure the directory exists
         dest_path.parent.mkdir(parents=True, exist_ok=True)
         
-        async with self.session.get(url, headers=headers) as response:
-            response.raise_for_status()
+        _LOGGER.debug(f"Downloading file from URL: {url}")
+        _LOGGER.debug(f"Headers: {headers}")
+        _LOGGER.debug(f"Destination path: {dest_path}")
+        
+        start_time = time.time()
+        file_size = 0
+        
+        try:
+            async with self.session.get(url, headers=headers) as response:
+                response.raise_for_status()
+                _LOGGER.debug(f"Download response status: {response.status}")
+                _LOGGER.debug(f"Response headers: {response.headers}")
+                
+                with open(dest_path, "wb") as f:
+                    async for chunk in response.content.iter_chunked(CHUNK_SIZE):
+                        if chunk:
+                            chunk_size = len(chunk)
+                            file_size += chunk_size
+                            f.write(chunk)
             
-            with open(dest_path, "wb") as f:
-                async for chunk in response.content.iter_chunked(CHUNK_SIZE):
-                    if chunk:
-                        f.write(chunk)
+            download_time = time.time() - start_time
+            _LOGGER.debug(f"Download completed: {file_size} bytes in {download_time:.2f} seconds ({file_size/download_time/1024:.2f} KB/s)")
+        except Exception as e:
+            _LOGGER.error(f"Download failed: {str(e)}")
+            raise
     
     async def _save_metadata(self):
         """Save metadata about the recordings."""
