@@ -8,6 +8,7 @@ from pathlib import Path
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers import device_registry as dr
 from homeassistant.const import (
     CONF_HOST,
     CONF_USERNAME,
@@ -72,6 +73,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         DATA_COORDINATOR: coordinator,
     }
 
+    # Register the parent/hub device
+    device_registry = dr.async_get(hass)
+    device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, entry.entry_id)},
+        name="Reolink Recordings Hub",
+        manufacturer="Reolink",
+        model="Recordings Integration",
+        sw_version="1.0",
+    )
     
     # Set up all platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

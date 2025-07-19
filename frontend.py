@@ -4,6 +4,8 @@ from __future__ import annotations
 import os
 import logging
 import shutil
+import asyncio
+import concurrent.futures
 from pathlib import Path
 
 from homeassistant.components.frontend import add_extra_js_url
@@ -25,21 +27,29 @@ def setup_frontend(hass: HomeAssistant) -> None:
     www_dir = Path(hass.config.path("www"))
     www_js_path = www_dir / CARD_JS
     
-    # Make sure www directory exists
-    if not www_dir.exists():
-        www_dir.mkdir(parents=True)
+    # Use a separate thread for file operations to avoid blocking the event loop
+    def copy_file_task():
+        # Make sure www directory exists
+        if not www_dir.exists():
+            www_dir.mkdir(parents=True)
+        
+        # Copy the JS file from the component to www directory if it exists
+        if component_js_path.exists():
+            try:
+                shutil.copy2(component_js_path, www_js_path)
+                return True
+            except Exception as e:
+                _LOGGER.error(f"Failed to copy {CARD_JS} to www directory: {e}")
+                return False
+        else:
+            _LOGGER.error(f"Card JS file not found at {component_js_path}")
+            return False
     
-    # Copy the JS file from the component to www directory if it exists
-    if component_js_path.exists():
-        try:
-            shutil.copy2(component_js_path, www_js_path)
+    # Run the blocking operation in a thread pool
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        future = executor.submit(copy_file_task)
+        if future.result():
             _LOGGER.info(f"Copied {CARD_JS} to www directory")
-        except Exception as e:
-            _LOGGER.error(f"Failed to copy {CARD_JS} to www directory: {e}")
-            return
-    else:
-        _LOGGER.error(f"Card JS file not found at {component_js_path}")
-        return
     
     # Register the URL for the card
     url = f"/local/{CARD_JS}"

@@ -514,12 +514,12 @@ class ReolinkRecordingsCoordinator:
         """Generate an animated GIF from the video using ffmpeg."""
         import subprocess, shlex
 
-        # Generate animated GIF with optimized settings:
-        # - Scale to max 640px width for better quality while keeping file size reasonable
-        # - Use fps=2 for smooth animation without being too large
-        # - Use palettegen for better quality with dithering
-        # - Limit to first 10 seconds of video to keep GIF size manageable
-        cmd = f"ffmpeg -y -t 10 -i {shlex.quote(str(video_path))} -vf \"fps=2,scale=640:-1:flags=lanczos,palettegen=max_colors=256:stats_mode=diff\" -f image2 /tmp/palette.png && ffmpeg -y -t 10 -i {shlex.quote(str(video_path))} -i /tmp/palette.png -filter_complex \"fps=2,scale=640:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5\" {shlex.quote(str(snapshot_path))}"
+        # Generate animated GIF with reduced settings to improve loading time:
+        # - Scale to 320px width (reduced from 640px) for faster loading
+        # - Reduced to 1fps (from 2fps) to make files smaller
+        # - Still using palette optimization for quality
+        # - Limit to first 5 seconds (reduced from 10 seconds) for smaller file size
+        cmd = f"ffmpeg -y -t 5 -i {shlex.quote(str(video_path))} -vf \"fps=1,scale=320:-1:flags=lanczos,palettegen=max_colors=128:stats_mode=diff\" -f image2 /tmp/palette.png && ffmpeg -y -t 5 -i {shlex.quote(str(video_path))} -i /tmp/palette.png -filter_complex \"fps=1,scale=320:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5\" {shlex.quote(str(snapshot_path))}"
         proc = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
         await proc.communicate()
         if proc.returncode != 0:

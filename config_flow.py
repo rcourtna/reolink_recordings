@@ -92,6 +92,7 @@ class ReolinkRecordingsOptionsFlow(config_entries.OptionsFlow):
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         """Initialize options flow."""
         self.config_entry = config_entry
+        super().__init__()
 
     async def async_step_init(
         self, user_input: Optional[Dict[str, Any]] = None
@@ -100,22 +101,24 @@ class ReolinkRecordingsOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
+        current_options = self.config_entry.options
+        
         options = {
             vol.Optional(
                 CONF_SCAN_INTERVAL,
-                default=self.config_entry.options.get(
+                default=current_options.get(
                     CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
                 ),
             ): vol.All(vol.Coerce(int), vol.Range(min=1, max=60)),
             vol.Optional(
                 CONF_STORAGE_PATH,
-                default=self.config_entry.options.get(
+                default=current_options.get(
                     CONF_STORAGE_PATH, DEFAULT_STORAGE_PATH
                 ),
             ): str,
             vol.Optional(
                 CONF_SNAPSHOT_FORMAT,
-                default=self.config_entry.options.get(
+                default=current_options.get(
                     CONF_SNAPSHOT_FORMAT, DEFAULT_SNAPSHOT_FORMAT
                 ),
             ): vol.In([
@@ -125,13 +128,13 @@ class ReolinkRecordingsOptionsFlow(config_entries.OptionsFlow):
             ]),
             vol.Optional(
                 CONF_ENABLE_CACHING,
-                default=self.config_entry.options.get(
+                default=current_options.get(
                     CONF_ENABLE_CACHING, DEFAULT_ENABLE_CACHING
                 ),
             ): bool,
             vol.Optional(
                 CONF_MEDIA_PLAYER,
-                default=self.config_entry.options.get(
+                default=current_options.get(
                     CONF_MEDIA_PLAYER, DEFAULT_MEDIA_PLAYER
                 ),
             ): str,

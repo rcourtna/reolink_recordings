@@ -76,7 +76,7 @@ class ReolinkRecordingSensor(CoordinatorEntity, SensorEntity):
             name=camera_name,
             manufacturer="Reolink",
             model="Camera",
-            via_device=(DOMAIN, config_entry_id),
+            via_device=(DOMAIN, config_entry_id),  # This now references the parent device created in __init__.py
         )
         self._attr_icon = "mdi:video"
         
