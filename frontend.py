@@ -36,16 +36,17 @@ def setup_frontend(hass: HomeAssistant) -> None:
         # Copy the JS file from the component to www directory if it exists
         if component_js_path.exists():
             try:
-                # Check if file already exists and remove it (whether it's a regular file or symlink)
-                if www_js_path.exists() or os.path.islink(www_js_path):
-                    os.remove(www_js_path)
-                
-                # Create a symlink instead of copying
-                os.symlink(component_js_path, www_js_path)
-                _LOGGER.debug(f"Created symlink from {component_js_path} to {www_js_path}")
-                return True
+                # Only copy the file if it doesn't already exist in the www directory
+                if not www_js_path.exists():
+                    # Copy the file instead of creating a symlink
+                    shutil.copy2(component_js_path, www_js_path)
+                    _LOGGER.debug(f"Copied {component_js_path} to {www_js_path}")
+                    return True
+                else:
+                    _LOGGER.debug(f"{CARD_JS} already exists in www directory, preserving local changes")
+                    return True
             except Exception as e:
-                _LOGGER.error(f"Failed to create symlink for {CARD_JS} in www directory: {e}")
+                _LOGGER.error(f"Failed to copy {CARD_JS} to www directory: {e}")
                 return False
         else:
             _LOGGER.error(f"Card JS file not found at {component_js_path}")
@@ -55,7 +56,7 @@ def setup_frontend(hass: HomeAssistant) -> None:
     with concurrent.futures.ThreadPoolExecutor() as executor:
         future = executor.submit(copy_file_task)
         if future.result():
-            _LOGGER.info(f"Created symlink for {CARD_JS} in www directory")
+            _LOGGER.info(f"Ensured {CARD_JS} exists in www directory")
     
     # Register the URL for the card
     url = f"/local/{CARD_JS}"
