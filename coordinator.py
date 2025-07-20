@@ -99,12 +99,17 @@ class ReolinkRecordingsCoordinator:
         self.recordings_dir = storage_dir / "recordings"
         os.makedirs(self.recordings_dir, exist_ok=True)
         
-        # Now that directories are created, load cached metadata
-        self._load_cached_metadata()
+        # Flag to track if we've loaded cached metadata
+        self._metadata_loaded = False
 
     async def async_refresh(self, *_):
         """Refresh data from Reolink cameras."""
         try:
+            # Load cached metadata on first run
+            if not self._metadata_loaded:
+                await self._load_cached_metadata()
+                self._metadata_loaded = True
+            
             _LOGGER.debug("Fetching latest Reolink recordings")
             
             # Discover cameras and their latest recordings
@@ -141,10 +146,10 @@ class ReolinkRecordingsCoordinator:
         # Get bearer token for API access
         token = await self._get_auth_token()
         
-        # Use the "media_player.browse_media" service to discover Reolink cameras
-        # This is equivalent to the Python script's functionality but using HA's async methods
-        entity_id = self.media_player_entity  # Use configurable media player entity
+        # Get an available media player if possible
+        entity_id = await self._get_available_media_player()
         
+        # Even if entity_id is None, we'll try with direct API calls
         # Browse the root Reolink media source
         reolink_root = "media-source://reolink"
         root_result = await self._browse_media(entity_id, reolink_root, token)
@@ -431,35 +436,85 @@ class ReolinkRecordingsCoordinator:
         return self.password
 
     async def _browse_media(
-        self, entity_id: str, media_content_id: str, token: str, media_content_type: str = "app"
+        self, entity_id: str, media_content_id: str, token: str, media_content_type: str = None
     ) -> Dict[str, Any]:
-        """Browse media using the media_player.browse_media service."""
-        url = f"{self.host}/api/services/media_player/browse_media?return_response=true"
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json"
-        }
-        data = {
-            "entity_id": entity_id,
-            "media_content_id": media_content_id,
-            "media_content_type": media_content_type
-        }
+        """Browse media using either a media player entity or direct API calls."""
+        # If we have a valid entity_id, use the media_player.browse_media service
+        if entity_id:
+            url = f"{self.host}/api/services/media_player/browse_media?return_response=true"
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json"
+            }
+            
+            # Build data object - media_content_type is optional
+            data = {"entity_id": entity_id, "media_content_id": media_content_id}
+            if media_content_type:
+                data["media_content_type"] = media_content_type
+            
+            _LOGGER.debug(f"Using media player service with {entity_id}")
+            _LOGGER.debug(f"API REQUEST to {url}")
+            _LOGGER.debug(f"Request data: {json.dumps(data)}")
+            
+            try:
+                async with self.session.post(url, json=data, headers=headers) as response:
+                    response.raise_for_status()
+                    result = await response.json()
+                    _LOGGER.debug(f"API RESPONSE status: {response.status}")
+                    _LOGGER.debug(f"Response keys: {list(result.keys())}")
+                    if "service_response" in result and entity_id in result["service_response"]:
+                        response_data = result["service_response"][entity_id]
+                        _LOGGER.debug(f"Media browse response for {media_content_id}: {json.dumps(response_data)[:500]}...")
+                        return response_data
+                    else:
+                        _LOGGER.error(f"Invalid response format: {json.dumps(result)[:500]}...")
+                        # Don't raise, fall back to direct API
+            except Exception as e:
+                _LOGGER.error(f"Error using media_player.browse_media service: {e}")
+                # Fall back to direct API approach
         
-        _LOGGER.debug(f"API REQUEST to {url}")
-        _LOGGER.debug(f"Request data: {json.dumps(data)}")
+        # Direct Media Source API approach - no media player entity needed
+        _LOGGER.info(f"Using direct Media Source API for {media_content_id}")
         
-        async with self.session.post(url, json=data, headers=headers) as response:
-            response.raise_for_status()
-            result = await response.json()
-            _LOGGER.debug(f"API RESPONSE status: {response.status}")
-            _LOGGER.debug(f"Response keys: {list(result.keys())}")
-            if "service_response" in result and entity_id in result["service_response"]:
-                response_data = result["service_response"][entity_id]
-                _LOGGER.debug(f"Media browse response for {media_content_id}: {json.dumps(response_data)[:500]}...")
-                return response_data
-            else:
-                _LOGGER.error(f"Invalid response format: {json.dumps(result)[:500]}...")
-                raise ValueError(f"Invalid response format from media_player.browse_media service")
+        # Use the media_source/browse_media websocket API
+        try:
+            ws_url = f"{self.host}/api/websocket".replace("http", "ws", 1)
+            
+            async with websockets.connect(ws_url) as websocket:
+                auth_msg = await websocket.recv()  # hello message
+                
+                auth_request = {"type": "auth", "access_token": token}
+                await websocket.send(json.dumps(auth_request))
+                
+                auth_result = json.loads(await websocket.recv())
+                if auth_result["type"] != "auth_ok":
+                    _LOGGER.error(f"WebSocket authentication failed: {json.dumps(auth_result)}")
+                    raise RuntimeError("WebSocket authentication failed")
+                
+                msg_id = self._get_next_ws_id()
+                
+                # For direct WebSocket API, do not include media_content_type
+                browse_request = {
+                    "id": msg_id,
+                    "type": "media_source/browse_media",
+                    "media_content_id": media_content_id
+                }
+                _LOGGER.debug(f"WebSocket browse request: {json.dumps(browse_request)}")
+                await websocket.send(json.dumps(browse_request))
+                
+                response = json.loads(await websocket.recv())
+                _LOGGER.debug(f"WebSocket browse response: {json.dumps(response)[:500]}...")
+                
+                if response.get("success") is False:
+                    error_msg = response.get('error', {}).get('message', 'Unknown error')
+                    _LOGGER.error(f"Failed to browse media: {error_msg}")
+                    raise RuntimeError(f"Failed to browse media: {error_msg}")
+                
+                # Return the result directly
+                return response.get("result", {})
+        except Exception as e:
+            _LOGGER.error(f"Error using direct Media Source API: {e}")
+            raise
 
     async def _ws_resolve(self, media_id: str, token: str) -> str:
         """Use the WebSocket API to resolve a media_content_id to a proxy URL."""
@@ -581,8 +636,15 @@ class ReolinkRecordingsCoordinator:
             "recording_cache": self.recording_cache,  # Save cache for persistence between restarts
         }
         
-        with open(metadata_file, "w") as f:
-            json.dump(metadata, f, indent=2)
+        try:
+            # Use async file operations to avoid blocking warnings
+            import aiofiles
+            async with aiofiles.open(metadata_file, "w") as f:
+                await f.write(json.dumps(metadata, indent=2))
+        except ImportError:
+            # Fallback to sync operations if aiofiles not available
+            with open(metadata_file, "w") as f:
+                json.dump(metadata, f, indent=2)
     
     def _get_next_ws_id(self) -> int:
         """Get the next WebSocket message ID."""
@@ -590,14 +652,17 @@ class ReolinkRecordingsCoordinator:
         self._ws_id += 1
         return result
         
-    def _load_cached_metadata(self):
+    async def _load_cached_metadata(self):
         """Load cached metadata from file if it exists."""
         metadata_file = self.metadata_dir / "recordings.json"
         
         if metadata_file.exists():
             try:
-                with open(metadata_file, "r") as f:
-                    metadata = json.load(f)
+                # Use async file operations to avoid blocking warnings
+                import aiofiles
+                async with aiofiles.open(metadata_file, "r") as f:
+                    content = await f.read()
+                    metadata = json.loads(content)
                 
                 # Restore recording cache if available
                 if "recording_cache" in metadata:
@@ -608,6 +673,21 @@ class ReolinkRecordingsCoordinator:
                 if "recordings" in metadata:
                     self.recording_paths = metadata["recordings"]
                     _LOGGER.debug(f"Loaded recording paths with {len(self.recording_paths)} entries")
+            except ImportError:
+                # Fallback to sync operations if aiofiles not available
+                try:
+                    with open(metadata_file, "r") as f:
+                        metadata = json.load(f)
+                    
+                    if "recording_cache" in metadata:
+                        self.recording_cache = metadata["recording_cache"]
+                        _LOGGER.debug(f"Loaded recording cache with {len(self.recording_cache)} entries")
+                        
+                    if "recordings" in metadata:
+                        self.recording_paths = metadata["recordings"]
+                        _LOGGER.debug(f"Loaded recording paths with {len(self.recording_paths)} entries")
+                except Exception as e:
+                    _LOGGER.warning(f"Error loading cached metadata: {e}")
             except Exception as e:
                 _LOGGER.warning(f"Error loading cached metadata: {e}")
                 # Initialize empty cache if loading fails
@@ -632,10 +712,17 @@ class ReolinkRecordingsCoordinator:
 
     async def async_request_refresh(self):
         """Request an immediate data refresh."""
-        # Only refresh if we don't already have data to avoid redundant downloads
-        if not self.data or "cameras" not in self.data or not self.data["cameras"]:
-            _LOGGER.debug("No existing data, performing full refresh")
-            await self.async_refresh()
-        else:
-            _LOGGER.debug("Using existing data, skipping redundant refresh")
-            return True
+        await self.async_refresh()
+    
+    async def _get_available_media_player(self) -> str:
+        """Get an available media player entity, with fallback to direct API calls if needed."""
+        # Try configured media player first
+        candidate = self.media_player_entity
+        state = self.hass.states.get(candidate)
+        if state and state.state not in ["unavailable", "unknown"]:
+            _LOGGER.info(f"Using configured media player: {candidate} (state: {state.state})")
+            return candidate
+            
+        # No media player found, but don't error out - we'll use direct API calls
+        _LOGGER.info(f"No media player available, using direct media source API instead")
+        return None  # None signals to use direct API approach

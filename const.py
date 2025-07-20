@@ -9,7 +9,7 @@ CONF_STORAGE_PATH = "storage_path"
 CONF_ENABLE_CACHING = "enable_caching"
 DEFAULT_ENABLE_CACHING = True
 CONF_MEDIA_PLAYER = "media_player_entity"
-DEFAULT_MEDIA_PLAYER = "media_player.living_room_tv"
+DEFAULT_MEDIA_PLAYER = "media_player.reolink_recordings_browser"
 
 # Snapshot format options
 CONF_SNAPSHOT_FORMAT = "snapshot_format"

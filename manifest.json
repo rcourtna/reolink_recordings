@@ -2,7 +2,7 @@
   "domain": "reolink_recordings",
   "name": "Reolink Recordings",
   "documentation": "https://github.com/yourusername/reolink_recordings",
-  "dependencies": ["reolink"],
+  "dependencies": ["reolink", "cast"],
   "codeowners": ["@yourusername"],
   "config_flow": true,
   "iot_class": "local_polling",
