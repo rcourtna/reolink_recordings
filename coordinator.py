@@ -138,6 +138,13 @@ class ReolinkRecordingsCoordinator:
                 "cameras": cameras_data
             }
             
+            # TEMPORARY DEBUG: Log detailed data structure for debugging sensor issues
+            _LOGGER.warning("========== COORDINATOR DATA DEBUG ==========")
+            _LOGGER.warning(f"Complete data structure: {self.data}")
+            _LOGGER.warning(f"Recording paths: {self.recording_paths}")
+            _LOGGER.warning(f"GIF snapshot paths: {self.snapshot_paths}")
+            _LOGGER.warning(f"JPG snapshot paths: {self.jpg_snapshot_paths}")
+            
             # Save metadata
             await self._save_metadata()
 
@@ -344,16 +351,31 @@ class ReolinkRecordingsCoordinator:
                 if self.enable_caching:
                     _LOGGER.info(f"Skipping download for {camera_name} - already have the same recording (ID: {recording_id})")
                     
-                    # Update the data structures with existing paths
-                    if consistent_camera_name in self.recording_paths:
-                        # Record the video path in our mapping for reliability
-                        self.recording_paths[camera_name] = self.recording_paths[consistent_camera_name]
+                    # Create a fixed slug for filename consistency
+                    camera_slug = consistent_camera_name.lower().replace(" ", "_")
+                    
+                    # Define expected file paths
+                    video_path = self.recordings_dir / f"{camera_slug}_latest.mp4"
+                    gif_path = self.recordings_dir / f"{camera_slug}_latest.gif"
+                    jpg_path = self.recordings_dir / f"{camera_slug}_latest.jpg"
+                    
+                    # Update video path if file exists
+                    if video_path.exists():
+                        _LOGGER.debug(f"Using existing video for {camera_name} at {video_path}")
+                        self.recording_paths[camera_name] = str(video_path)
+                        self.recording_paths[consistent_camera_name] = str(video_path)
+                    
+                    # Always check for snapshot files on disk, even when skipping download
+                    # This ensures we always have snapshot paths even if they were never added before
+                    if gif_path.exists():
+                        _LOGGER.debug(f"Using existing GIF snapshot for {camera_name} at {gif_path}")
+                        self.snapshot_paths[camera_name] = str(gif_path)
+                        self.snapshot_paths[consistent_camera_name] = str(gif_path)
                         
-                        # Update snapshot paths if they exist
-                        if consistent_camera_name in self.snapshot_paths:
-                            self.snapshot_paths[camera_name] = self.snapshot_paths[consistent_camera_name]
-                        if consistent_camera_name in self.jpg_snapshot_paths:
-                            self.jpg_snapshot_paths[camera_name] = self.jpg_snapshot_paths[consistent_camera_name]
+                    if jpg_path.exists():
+                        _LOGGER.debug(f"Using existing JPG snapshot for {camera_name} at {jpg_path}")
+                        self.jpg_snapshot_paths[camera_name] = str(jpg_path)
+                        self.jpg_snapshot_paths[consistent_camera_name] = str(jpg_path)
                             
                     continue
                 else:
