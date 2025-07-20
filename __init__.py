@@ -58,8 +58,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry=entry,  # Pass the entire config entry for access to options
     )
 
-    # Do initial data fetch
-    await coordinator.async_refresh()
+    # Skip initial data fetch on startup for performance reasons
+    # Data will be fetched on first scheduled scan_interval or manual refresh
+    # await coordinator.async_refresh()
 
     # Set up periodic update
     entry.async_on_unload(
@@ -91,7 +92,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     setup_frontend(hass)
     
     # Register services
-    # await register_services(hass)
+    await register_services(hass, entry)
 
     return True
 
@@ -103,6 +104,32 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN].pop(entry.entry_id)
 
     return unload_ok
+
+
+async def register_services(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Register services for Reolink Recordings."""
+    
+    async def handle_refresh(call):
+        """Handle the manual refresh service call."""
+        entry_id = call.data.get('entry_id', entry.entry_id)
+        if entry_id in hass.data[DOMAIN]:
+            coordinator = hass.data[DOMAIN][entry_id][DATA_COORDINATOR]
+            _LOGGER.info("Manual refresh requested for Reolink Recordings")
+            await coordinator.async_refresh()
+            _LOGGER.info("Manual refresh completed for Reolink Recordings")
+        else:
+            _LOGGER.error(f"Entry ID {entry_id} not found for refresh service call")
+    
+    import voluptuous as vol
+    from homeassistant.helpers import config_validation as cv
+    
+    SERVICE_REFRESH_SCHEMA = vol.Schema({
+        vol.Optional('entry_id'): cv.string,
+    })
+    
+    hass.services.async_register(
+        DOMAIN, 'refresh', handle_refresh, schema=SERVICE_REFRESH_SCHEMA
+    )
 
 
 async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:

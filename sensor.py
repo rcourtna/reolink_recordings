@@ -33,8 +33,8 @@ async def async_setup_entry(
     """Set up Reolink Recording sensors."""
     coordinator = hass.data[DOMAIN][config_entry.entry_id][DATA_COORDINATOR]
 
-    # Make sure we have fresh data before building sensors
-    await coordinator.async_request_refresh()
+    # We already have fresh data from __init__.py, so no need to refresh again
+    # await coordinator.async_request_refresh()
 
     entities = []
     # Add a sensor for each camera once data is available

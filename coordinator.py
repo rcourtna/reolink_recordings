@@ -97,8 +97,27 @@ class ReolinkRecordingsCoordinator:
         # Flag to track if we've loaded cached metadata
         self._metadata_loaded = False
 
+    def _update_config_from_options(self):
+        """Update configuration values from entry options."""
+        if self.entry and CONF_ENABLE_CACHING in self.entry.options:
+            old_value = self.enable_caching
+            self.enable_caching = self.entry.options[CONF_ENABLE_CACHING]
+            if old_value != self.enable_caching:
+                _LOGGER.debug(f"Updated caching setting: {self.enable_caching}")
+        
+        if self.entry and CONF_SNAPSHOT_FORMAT in self.entry.options:
+            old_format = self.snapshot_format
+            self.snapshot_format = self.entry.options[CONF_SNAPSHOT_FORMAT]
+            if old_format != self.snapshot_format:
+                _LOGGER.debug(f"Updated snapshot format: {self.snapshot_format}")
+    
     async def async_refresh(self, *_):
         """Refresh data from Reolink cameras."""
+        _LOGGER.info("Fetching latest Reolink recordings")
+        
+        # Update configuration from latest options
+        self._update_config_from_options()
+        
         try:
             # Load cached metadata on first run
             if not self._metadata_loaded:
