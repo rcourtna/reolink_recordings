@@ -561,29 +561,102 @@ class ReolinkRecordingCardEditor extends HTMLElement {
   }
 }
 
+// Robust registration with retry mechanism to avoid race conditions with Home Assistant
+// This approach attempts registration multiple times with increasing delays
+const CARD_VERSION = '1.0.0';
+const CARD_NAME = 'Reolink Recording Card';
+
+// Card registration function with retry capability
+const registerCard = (function() {
+  // Registration configuration
+  const config = {
+    type: 'reolink-recording-card',
+    name: CARD_NAME,
+    description: 'A card to display Reolink camera recordings with auto-refresh'
+  };
+  
+  // Check if card is already registered
+  const isRegistered = () => {
+    if (!window.customCards) return false;
+    return window.customCards.some(card => card.type === config.type);
+  };
+  
+  // Log with consistent styling
+  const log = (message, isError = false) => {
+    const style = 'color: white; font-weight: bold; background: ' + 
+                 (isError ? '#c42929' : 'dimgray');
+    const headerStyle = 'color: orange; font-weight: bold; background: black';
+    
+    console[isError ? 'error' : 'info'](
+      `%c REOLINK-RECORDING-CARD %c ${message} `, 
+      headerStyle, 
+      style
+    );
+  };
+  
+  // The actual registration function
+  return function(maxRetries = 5, initialDelay = 100) {
+    // If already registered, don't try again
+    if (isRegistered()) {
+      log(`v${CARD_VERSION} (already registered)`);
+      return;
+    }
+    
+    let retries = 0;
+    
+    const attemptRegistration = () => {
+      try {
+        // Only define the custom elements if they haven't been defined yet
+        // This prevents the "has already been used" error
+        if (!customElements.get('reolink-recording-card')) {
+          customElements.define('reolink-recording-card', ReolinkRecordingCard);
+          log('Defined reolink-recording-card custom element');
+        }
+        
+        if (!customElements.get('reolink-recording-card-editor')) {
+          customElements.define('reolink-recording-card-editor', ReolinkRecordingCardEditor);
+          log('Defined reolink-recording-card-editor custom element');
+        }
+        
+        // Initialize customCards array if needed and register the card
+        window.customCards = window.customCards || [];
+        
+        // Only add to customCards if not already present
+        if (!window.customCards.some(card => card.type === config.type)) {
+          window.customCards.push(config);
+          log(`v${CARD_VERSION} registered successfully after ${retries} ${retries === 1 ? 'retry' : 'retries'}`);
+        } else {
+          log(`v${CARD_VERSION} already in customCards registry`);
+        }
+      } catch (e) {
+        // If we haven't exceeded max retries, try again with exponential backoff
+        if (retries < maxRetries) {
+          retries++;
+          const delay = initialDelay * Math.pow(2, retries - 1); // Exponential backoff
+          log(`Registration attempt ${retries}/${maxRetries} failed: ${e.message}, retrying in ${delay}ms...`);
+          
+          setTimeout(attemptRegistration, delay);
+        } else {
+          // We've failed after max retries
+          log(`Failed to register card after ${maxRetries} attempts: ${e.message}`, true);
+        }
+      }
+    };
+    
+    // Start the registration process
+    log(`v${CARD_VERSION} attempting registration...`);
+    attemptRegistration();
+  };
+})();
+
 // Register the custom elements
 customElements.define('reolink-recording-card', ReolinkRecordingCard);
 customElements.define('reolink-recording-card-editor', ReolinkRecordingCardEditor);
 
-// More robust registration with Home Assistant
-// Wait for the window to fully load before registering the card
+// Wait for the window to fully load before starting registration
 window.addEventListener('load', () => {
-  // Small delay to ensure Home Assistant frontend is fully initialized
+  // Small initial delay to ensure Home Assistant is starting to initialize
   setTimeout(() => {
-    // Tell Home Assistant about the card
-    window.customCards = window.customCards || [];
-    window.customCards.push({
-      type: 'reolink-recording-card',
-      name: 'Reolink Recording Card',
-      description: 'A card to display Reolink camera recordings with auto-refresh'
-    });
-    
-    console.info(
-      '%c REOLINK-RECORDING-CARD %c v1.0.0 ',
-      'color: orange; font-weight: bold; background: black',
-      'color: white; font-weight: bold; background: dimgray'
-    );
-    
-    console.info('Reolink Recording Card successfully registered with Home Assistant');
-  }, 100); // Small delay to ensure proper registration timing
+    registerCard(5, 200); // 5 retries, starting with 200ms delay
+  }, 100);
 });
