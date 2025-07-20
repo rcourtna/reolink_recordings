@@ -27,8 +27,6 @@ from .const import (
     SNAPSHOT_FORMAT_BOTH,
     CONF_ENABLE_CACHING,
     DEFAULT_ENABLE_CACHING,
-    CONF_MEDIA_PLAYER,
-    DEFAULT_MEDIA_PLAYER,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -132,12 +130,7 @@ class ReolinkRecordingsOptionsFlow(config_entries.OptionsFlow):
                     CONF_ENABLE_CACHING, DEFAULT_ENABLE_CACHING
                 ),
             ): bool,
-            vol.Optional(
-                CONF_MEDIA_PLAYER,
-                default=current_options.get(
-                    CONF_MEDIA_PLAYER, DEFAULT_MEDIA_PLAYER
-                ),
-            ): str,
+            # Media player option removed - always using direct API
         }
 
         return self.async_show_form(step_id="init", data_schema=vol.Schema(options))

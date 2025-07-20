@@ -26,8 +26,6 @@ from .const import (
     DEFAULT_SNAPSHOT_FORMAT,
     CONF_ENABLE_CACHING,
     DEFAULT_ENABLE_CACHING,
-    CONF_MEDIA_PLAYER,
-    DEFAULT_MEDIA_PLAYER,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -75,11 +73,8 @@ class ReolinkRecordingsCoordinator:
             self.snapshot_format = entry.options[CONF_SNAPSHOT_FORMAT]
             _LOGGER.debug(f"Using snapshot format: {self.snapshot_format}")
             
-        # Get media player entity preference or use default
-        self.media_player_entity = DEFAULT_MEDIA_PLAYER
-        if entry and CONF_MEDIA_PLAYER in entry.options:
-            self.media_player_entity = entry.options[CONF_MEDIA_PLAYER]
-            _LOGGER.debug(f"Using media player entity: {self.media_player_entity}")
+        # Media player configuration removed - always using direct Media Source API
+        _LOGGER.debug("Using direct Media Source API for Reolink recordings")
         
         # Get caching preference or use default
         self.enable_caching = DEFAULT_ENABLE_CACHING
@@ -146,13 +141,9 @@ class ReolinkRecordingsCoordinator:
         # Get bearer token for API access
         token = await self._get_auth_token()
         
-        # Get an available media player if possible
-        entity_id = await self._get_available_media_player()
-        
-        # Even if entity_id is None, we'll try with direct API calls
-        # Browse the root Reolink media source
+        # Browse the root Reolink media source using direct API
         reolink_root = "media-source://reolink"
-        root_result = await self._browse_media(entity_id, reolink_root, token)
+        root_result = await self._browse_media(reolink_root, token)
         
         if "children" not in root_result or not root_result["children"]:
             _LOGGER.warning("No Reolink cameras found")
@@ -200,7 +191,7 @@ class ReolinkRecordingsCoordinator:
             _LOGGER.debug(f"Processing camera: {camera_name} (index: {camera_index})")
                 
             try:
-                result = await self._get_latest_recording(entity_id, camera_index, camera_name, token)
+                result = await self._get_latest_recording(camera_index, camera_name, token)
                 results.append(result)
             except Exception as e:
                 _LOGGER.error(f"Error processing camera {camera_name}: {str(e)}")
@@ -212,7 +203,7 @@ class ReolinkRecordingsCoordinator:
         return results
 
     async def _get_latest_recording(
-        self, entity_id: str, camera_index: int, camera_name: str, token: str
+        self, camera_index: int, camera_name: str, token: str
     ) -> Dict[str, Any]:
         """Get the latest recording for a specific camera index."""
         # Step 1: Get camera resolution options
@@ -228,7 +219,7 @@ class ReolinkRecordingsCoordinator:
             _LOGGER.debug(f"Couldn't extract NVR ID from existing entities: {e}")
             
         camera_path = f"media-source://reolink/CAM|{nvr_id}|{camera_index}"
-        camera_result = await self._browse_media(entity_id, camera_path, token, "playlist")
+        camera_result = await self._browse_media(camera_path, token)
         
         # Step 2: Get the highest resolution option (main)
         if "children" not in camera_result or not camera_result["children"]:
@@ -249,7 +240,7 @@ class ReolinkRecordingsCoordinator:
             return {"camera": camera_name, "error": "No resolution options found"}
         
         # Step 3: Get available dates
-        res_result = await self._browse_media(entity_id, high_res_option["media_content_id"], token, "playlist")
+        res_result = await self._browse_media(high_res_option["media_content_id"], token)
         
         if "children" not in res_result or not res_result["children"]:
             return {"camera": camera_name, "error": "No dates found"}
@@ -263,7 +254,7 @@ class ReolinkRecordingsCoordinator:
         latest_date = dates[0]
         
         # Step 4: Get recordings for the latest date
-        date_result = await self._browse_media(entity_id, latest_date["media_content_id"], token, "playlist")
+        date_result = await self._browse_media(latest_date["media_content_id"], token)
         
         if "children" not in date_result or not date_result["children"]:
             return {"camera": camera_name, "date": latest_date["title"], "error": "No recordings found"}
@@ -435,86 +426,83 @@ class ReolinkRecordingsCoordinator:
         # In a production environment, you'd use a more secure method
         return self.password
 
-    async def _browse_media(
-        self, entity_id: str, media_content_id: str, token: str, media_content_type: str = None
-    ) -> Dict[str, Any]:
-        """Browse media using either a media player entity or direct API calls."""
-        # If we have a valid entity_id, use the media_player.browse_media service
-        if entity_id:
-            url = f"{self.host}/api/services/media_player/browse_media?return_response=true"
-            headers = {
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json"
-            }
-            
-            # Build data object - media_content_type is optional
-            data = {"entity_id": entity_id, "media_content_id": media_content_id}
-            if media_content_type:
-                data["media_content_type"] = media_content_type
-            
-            _LOGGER.debug(f"Using media player service with {entity_id}")
-            _LOGGER.debug(f"API REQUEST to {url}")
-            _LOGGER.debug(f"Request data: {json.dumps(data)}")
-            
-            try:
-                async with self.session.post(url, json=data, headers=headers) as response:
-                    response.raise_for_status()
-                    result = await response.json()
-                    _LOGGER.debug(f"API RESPONSE status: {response.status}")
-                    _LOGGER.debug(f"Response keys: {list(result.keys())}")
-                    if "service_response" in result and entity_id in result["service_response"]:
-                        response_data = result["service_response"][entity_id]
-                        _LOGGER.debug(f"Media browse response for {media_content_id}: {json.dumps(response_data)[:500]}...")
-                        return response_data
-                    else:
-                        _LOGGER.error(f"Invalid response format: {json.dumps(result)[:500]}...")
-                        # Don't raise, fall back to direct API
-            except Exception as e:
-                _LOGGER.error(f"Error using media_player.browse_media service: {e}")
-                # Fall back to direct API approach
+    async def _browse_media(self, media_content_id: str, token: str) -> Dict[str, Any]:
+        """Browse media using direct Media Source API calls.
         
-        # Direct Media Source API approach - no media player entity needed
-        _LOGGER.info(f"Using direct Media Source API for {media_content_id}")
+        Args:
+            media_content_id: Content ID to browse
+            token: Authentication token
+            
+        Returns:
+            Media browse results dictionary
+        """
+        # Always use direct WebSocket API
+        return await self._browse_via_websocket_api(media_content_id, token)
         
-        # Use the media_source/browse_media websocket API
+    # _browse_via_media_player method removed - always using direct Media Source API
+    
+    async def _browse_via_websocket_api(self, media_content_id: str, token: str) -> Dict[str, Any]:
+        """Browse media using direct WebSocket API calls to the media source."""
+        _LOGGER.debug(f"Using direct Media Source API for {media_content_id}")
+        
+        websocket = None
         try:
-            ws_url = f"{self.host}/api/websocket".replace("http", "ws", 1)
+            # Get an authenticated websocket connection
+            # Properly construct WebSocket URL from host
+            if self.host.startswith("http://"):
+                websocket_url = f"ws://{self.host[7:]}/api/websocket"
+            elif self.host.startswith("https://"):
+                websocket_url = f"wss://{self.host[8:]}/api/websocket"
+            else:
+                websocket_url = f"ws://{self.host}/api/websocket"
+                
+            _LOGGER.debug(f"Connecting to WebSocket at {websocket_url}")
+            websocket = await websockets.connect(websocket_url, ssl=None)
             
-            async with websockets.connect(ws_url) as websocket:
-                auth_msg = await websocket.recv()  # hello message
+            # WebSocket handshake - receive initial auth required message
+            auth_required = await websocket.recv()
+            auth_required_data = json.loads(auth_required)
+            _LOGGER.debug(f"Received auth required message: {auth_required_data}")
+            
+            if auth_required_data.get("type") != "auth_required":
+                raise RuntimeError(f"Unexpected initial message: {auth_required_data}")
                 
-                auth_request = {"type": "auth", "access_token": token}
-                await websocket.send(json.dumps(auth_request))
-                
-                auth_result = json.loads(await websocket.recv())
-                if auth_result["type"] != "auth_ok":
-                    _LOGGER.error(f"WebSocket authentication failed: {json.dumps(auth_result)}")
-                    raise RuntimeError("WebSocket authentication failed")
-                
-                msg_id = self._get_next_ws_id()
-                
-                # For direct WebSocket API, do not include media_content_type
-                browse_request = {
-                    "id": msg_id,
-                    "type": "media_source/browse_media",
-                    "media_content_id": media_content_id
-                }
-                _LOGGER.debug(f"WebSocket browse request: {json.dumps(browse_request)}")
-                await websocket.send(json.dumps(browse_request))
-                
-                response = json.loads(await websocket.recv())
-                _LOGGER.debug(f"WebSocket browse response: {json.dumps(response)[:500]}...")
-                
-                if response.get("success") is False:
-                    error_msg = response.get('error', {}).get('message', 'Unknown error')
-                    _LOGGER.error(f"Failed to browse media: {error_msg}")
-                    raise RuntimeError(f"Failed to browse media: {error_msg}")
-                
-                # Return the result directly
-                return response.get("result", {})
+            # Send authentication message
+            auth_msg = {"type": "auth", "access_token": token}
+            await websocket.send(json.dumps(auth_msg))
+            
+            # Get auth result
+            auth_resp = await websocket.recv()
+            auth_resp_data = json.loads(auth_resp)
+            _LOGGER.debug(f"Auth response: {auth_resp_data}")
+            
+            if auth_resp_data.get("type") != "auth_ok":
+                raise RuntimeError("WebSocket authentication failed")
+            
+            # Send browse request - no media_content_type needed for WebSocket API
+            msg_id = self._get_next_ws_id()
+            browse_request = {
+                "id": msg_id,
+                "type": "media_source/browse_media",
+                "media_content_id": media_content_id
+            }
+            await websocket.send(json.dumps(browse_request))
+            
+            # Process response
+            response = await websocket.recv()
+            response_data = json.loads(response)
+            
+            if not response_data.get("success", False):
+                error = response_data.get("error", {}).get("message", "Unknown error")
+                raise RuntimeError(f"Media Source API error: {error}")
+            
+            return response_data.get("result", {})
+            
         except Exception as e:
-            _LOGGER.error(f"Error using direct Media Source API: {e}")
-            raise
+            raise RuntimeError(f"WebSocket API error: {str(e)}")
+        finally:
+            if websocket:
+                await websocket.close()
 
     async def _ws_resolve(self, media_id: str, token: str) -> str:
         """Use the WebSocket API to resolve a media_content_id to a proxy URL."""
@@ -714,15 +702,4 @@ class ReolinkRecordingsCoordinator:
         """Request an immediate data refresh."""
         await self.async_refresh()
     
-    async def _get_available_media_player(self) -> str:
-        """Get an available media player entity, with fallback to direct API calls if needed."""
-        # Try configured media player first
-        candidate = self.media_player_entity
-        state = self.hass.states.get(candidate)
-        if state and state.state not in ["unavailable", "unknown"]:
-            _LOGGER.info(f"Using configured media player: {candidate} (state: {state.state})")
-            return candidate
-            
-        # No media player found, but don't error out - we'll use direct API calls
-        _LOGGER.info(f"No media player available, using direct media source API instead")
-        return None  # None signals to use direct API approach
+    # _get_available_media_player method removed - always using direct Media Source API

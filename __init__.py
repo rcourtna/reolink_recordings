@@ -29,7 +29,7 @@ from .frontend import setup_frontend
 _LOGGER = logging.getLogger(__name__)
 
 # Media source is not a regular platform, it's registered separately
-PLATFORMS = ["sensor", "media_player"]
+PLATFORMS = ["sensor"]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

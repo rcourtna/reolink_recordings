@@ -8,8 +8,7 @@ DEFAULT_STORAGE_PATH = "www/reolink_recordings"
 CONF_STORAGE_PATH = "storage_path"
 CONF_ENABLE_CACHING = "enable_caching"
 DEFAULT_ENABLE_CACHING = True
-CONF_MEDIA_PLAYER = "media_player_entity"
-DEFAULT_MEDIA_PLAYER = "media_player.reolink_recordings_browser"
+# Media player configuration completely removed - always using direct Media Source API
 
 # Snapshot format options
 CONF_SNAPSHOT_FORMAT = "snapshot_format"
