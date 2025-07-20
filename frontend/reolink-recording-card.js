@@ -284,148 +284,224 @@ class ReolinkRecordingCardEditor extends HTMLElement {
       }))
       .sort((a, b) => a.label.localeCompare(b.label));
 
-    this.shadowRoot.innerHTML = `
-      <style>
-        .form {
-          display: flex;
-          flex-direction: column;
-          padding: 16px;
-        }
-        .row {
-          display: flex;
-          flex-direction: column;
-          margin-bottom: 16px;
-        }
-        .row label {
-          margin-bottom: 4px;
-        }
-        mwc-select, mwc-textfield {
-          width: 100%;
-        }
-        .help {
-          color: var(--secondary-text-color);
-          font-size: 12px;
-          margin-top: 4px;
-        }
-        .switch-row {
-          display: flex;
-          align-items: center;
-          margin-bottom: 8px;
-        }
-        .switch-row label {
-          flex-grow: 1;
-        }
-      </style>
-      
-      <div class="form">
-        <div class="row">
-          <label for="entity">Entity</label>
-          <mwc-select
-            id="entity"
-            label="Entity"
-            .value=${this._config.entity || ''}
-            @selected=${this._valueChanged}
-            @closed=${(e) => e.stopPropagation()}
-            fixedMenuPosition
-            naturalMenuWidth
-          >
-            ${entities.map(entity => `
-              <mwc-list-item .value=${entity.value}>${entity.label}</mwc-list-item>
-            `).join('')}
-          </mwc-select>
-          <div class="help">Select the Reolink recording sensor entity</div>
-        </div>
-
-        <div class="row">
-          <label for="title">Title</label>
-          <mwc-textfield
-            id="title"
-            label="Title"
-            .value=${this._config.title || ''}
-            @change=${this._valueChanged}
-          ></mwc-textfield>
-          <div class="help">Optional custom title (leave empty for auto title)</div>
-        </div>
-
-        <div class="row">
-          <label for="refresh">Refresh Interval</label>
-          <mwc-textfield
-            id="refresh_interval"
-            label="Refresh Interval (seconds)"
-            type="number"
-            min="10"
-            max="3600"
-            .value=${this._config.refresh_interval || '60'}
-            @change=${this._valueChanged}
-          ></mwc-textfield>
-          <div class="help">How often to refresh the image (10-3600 seconds)</div>
-        </div>
-
-        <div class="switch-row">
-          <label for="show_title">Show Title</label>
-          <mwc-switch
-            id="show_title"
-            .checked=${this._config.show_title !== false}
-            @change=${this._valueChanged}
-          ></mwc-switch>
-        </div>
-
-        <div class="switch-row">
-          <label for="show_state">Show State</label>
-          <mwc-switch
-            id="show_state"
-            .checked=${this._config.show_state !== false}
-            @change=${this._valueChanged}
-          ></mwc-switch>
-        </div>
-
-        <div class="row">
-          <label for="tap_action">Tap Action</label>
-          <mwc-select
-            id="tap_action"
-            label="Action"
-            .value=${this._config.tap_action?.action || 'url'}
-            @selected=${this._actionChanged}
-            @closed=${(e) => e.stopPropagation()}
-            fixedMenuPosition
-          >
-            <mwc-list-item value="url">Open Video URL</mwc-list-item>
-            <mwc-list-item value="more-info">More Info</mwc-list-item>
-            <mwc-list-item value="navigate">Navigate</mwc-list-item>
-            <mwc-list-item value="call-service">Call Service</mwc-list-item>
-          </mwc-select>
-        </div>
-
-        ${this._config.tap_action?.action === 'navigate' ? `
-          <div class="row">
-            <label for="navigation_path">Navigation Path</label>
-            <mwc-textfield
-              id="navigation_path"
-              label="Path"
-              .value=${this._config.tap_action?.navigation_path || ''}
-              @change=${this._tapValueChanged}
-            ></mwc-textfield>
-            <div class="help">Example: /lovelace/cameras</div>
-          </div>
-        ` : ''}
-
-        ${this._config.tap_action?.action === 'call-service' ? `
-          <div class="row">
-            <label for="service">Service</label>
-            <mwc-textfield
-              id="service"
-              label="Service"
-              .value=${this._config.tap_action?.service || ''}
-              @change=${this._tapValueChanged}
-            ></mwc-textfield>
-            <div class="help">Example: media_player.play_media</div>
-          </div>
-        ` : ''}
-      </div>
+    // Clear the shadow root and create elements programmatically
+    this.shadowRoot.innerHTML = '';
+    
+    // Create styles
+    const style = document.createElement('style');
+    style.textContent = `
+      .form {
+        display: flex;
+        flex-direction: column;
+        padding: 16px;
+        font-family: var(--paper-font-body1_-_font-family);
+      }
+      .row {
+        display: flex;
+        flex-direction: column;
+        margin-bottom: 16px;
+      }
+      .row label {
+        margin-bottom: 8px;
+        font-weight: 500;
+        color: var(--primary-text-color);
+      }
+      select, input[type="text"], input[type="number"] {
+        width: 100%;
+        padding: 8px 12px;
+        border: 1px solid var(--divider-color);
+        border-radius: 4px;
+        background-color: var(--card-background-color);
+        color: var(--primary-text-color);
+        font-size: 14px;
+        box-sizing: border-box;
+      }
+      select:focus, input:focus {
+        outline: none;
+        border-color: var(--primary-color);
+        box-shadow: 0 0 0 2px rgba(var(--rgb-primary-color), 0.2);
+      }
+      .help {
+        color: var(--secondary-text-color);
+        font-size: 12px;
+        margin-top: 4px;
+      }
+      .switch-row {
+        display: flex;
+        align-items: center;
+        margin-bottom: 16px;
+      }
+      .switch-row label {
+        flex-grow: 1;
+        margin-bottom: 0;
+        margin-right: 16px;
+      }
+      input[type="checkbox"] {
+        width: auto;
+        margin: 0;
+      }
     `;
+    
+    // Create form container
+    const form = document.createElement('div');
+    form.className = 'form';
+    
+    // Entity selection
+    const entityRow = this._createRow('Entity', 'Select the Reolink recording sensor entity');
+    const entitySelect = document.createElement('select');
+    entitySelect.id = 'entity';
+    entitySelect.addEventListener('change', this._handleChange.bind(this));
+    
+    // Add empty option
+    const emptyOption = document.createElement('option');
+    emptyOption.value = '';
+    emptyOption.textContent = 'Select an entity...';
+    entitySelect.appendChild(emptyOption);
+    
+    // Add entity options
+    entities.forEach(entity => {
+      const option = document.createElement('option');
+      option.value = entity.value;
+      option.textContent = entity.label;
+      if (entity.value === this._config.entity) {
+        option.selected = true;
+      }
+      entitySelect.appendChild(option);
+    });
+    
+    entityRow.insertBefore(entitySelect, entityRow.lastElementChild);
+    form.appendChild(entityRow);
+    
+    // Title input
+    const titleRow = this._createRow('Title', 'Optional custom title (leave empty for auto title)');
+    const titleInput = document.createElement('input');
+    titleInput.type = 'text';
+    titleInput.id = 'title';
+    titleInput.value = this._config.title || '';
+    titleInput.placeholder = 'Custom title...';
+    titleInput.addEventListener('change', this._handleChange.bind(this));
+    titleRow.insertBefore(titleInput, titleRow.lastElementChild);
+    form.appendChild(titleRow);
+    
+    // Refresh interval input
+    const refreshRow = this._createRow('Refresh Interval', 'How often to refresh the image (10-3600 seconds)');
+    const refreshInput = document.createElement('input');
+    refreshInput.type = 'number';
+    refreshInput.id = 'refresh_interval';
+    refreshInput.min = '10';
+    refreshInput.max = '3600';
+    refreshInput.value = this._config.refresh_interval || '60';
+    refreshInput.addEventListener('change', this._handleChange.bind(this));
+    refreshRow.insertBefore(refreshInput, refreshRow.lastElementChild);
+    form.appendChild(refreshRow);
+    
+    // Show title checkbox
+    const showTitleRow = this._createSwitchRow('Show Title', 'show_title', this._config.show_title !== false);
+    form.appendChild(showTitleRow);
+    
+    // Show state checkbox
+    const showStateRow = this._createSwitchRow('Show State', 'show_state', this._config.show_state !== false);
+    form.appendChild(showStateRow);
+    
+    // Tap action selection
+    const tapActionRow = this._createRow('Tap Action', '');
+    const tapActionSelect = document.createElement('select');
+    tapActionSelect.id = 'tap_action';
+    tapActionSelect.addEventListener('change', this._handleTapActionChange.bind(this));
+    
+    const actions = [
+      { value: 'url', label: 'Open Video URL' },
+      { value: 'more-info', label: 'More Info' },
+      { value: 'navigate', label: 'Navigate' },
+      { value: 'call-service', label: 'Call Service' }
+    ];
+    
+    actions.forEach(action => {
+      const option = document.createElement('option');
+      option.value = action.value;
+      option.textContent = action.label;
+      if (action.value === (this._config.tap_action?.action || 'url')) {
+        option.selected = true;
+      }
+      tapActionSelect.appendChild(option);
+    });
+    
+    tapActionRow.insertBefore(tapActionSelect, tapActionRow.lastElementChild);
+    form.appendChild(tapActionRow);
+    
+    // Dynamic fields based on tap action
+    this._addDynamicFields(form);
+    
+    // Add everything to shadow root
+    this.shadowRoot.appendChild(style);
+    this.shadowRoot.appendChild(form);
   }
-
-  _valueChanged(ev) {
+  
+  _createRow(labelText, helpText) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    
+    const label = document.createElement('label');
+    label.textContent = labelText;
+    row.appendChild(label);
+    
+    if (helpText) {
+      const help = document.createElement('div');
+      help.className = 'help';
+      help.textContent = helpText;
+      row.appendChild(help);
+    }
+    
+    return row;
+  }
+  
+  _createSwitchRow(labelText, id, checked) {
+    const row = document.createElement('div');
+    row.className = 'switch-row';
+    
+    const label = document.createElement('label');
+    label.textContent = labelText;
+    row.appendChild(label);
+    
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.id = id;
+    checkbox.checked = checked;
+    checkbox.addEventListener('change', this._handleChange.bind(this));
+    row.appendChild(checkbox);
+    
+    return row;
+  }
+  
+  _addDynamicFields(form) {
+    const tapAction = this._config.tap_action?.action || 'url';
+    
+    if (tapAction === 'navigate') {
+      const navRow = this._createRow('Navigation Path', 'Example: /lovelace/cameras');
+      const navInput = document.createElement('input');
+      navInput.type = 'text';
+      navInput.id = 'navigation_path';
+      navInput.value = this._config.tap_action?.navigation_path || '';
+      navInput.placeholder = '/lovelace/cameras';
+      navInput.addEventListener('change', this._handleTapValueChange.bind(this));
+      navRow.insertBefore(navInput, navRow.lastElementChild);
+      form.appendChild(navRow);
+    }
+    
+    if (tapAction === 'call-service') {
+      const serviceRow = this._createRow('Service', 'Example: media_player.play_media');
+      const serviceInput = document.createElement('input');
+      serviceInput.type = 'text';
+      serviceInput.id = 'service';
+      serviceInput.value = this._config.tap_action?.service || '';
+      serviceInput.placeholder = 'media_player.play_media';
+      serviceInput.addEventListener('change', this._handleTapValueChange.bind(this));
+      serviceRow.insertBefore(serviceInput, serviceRow.lastElementChild);
+      form.appendChild(serviceRow);
+    }
+  }
+  
+  _handleChange(ev) {
     if (!this._config || !this._hass) return;
 
     const target = ev.target;
@@ -440,25 +516,24 @@ class ReolinkRecordingCardEditor extends HTMLElement {
 
     this._fireConfigChanged();
   }
-
-  _actionChanged(ev) {
+  
+  _handleTapActionChange(ev) {
     if (!this._config || !this._hass) return;
 
-    const target = ev.target;
-    const action = target.value;
+    const action = ev.target.value;
 
     this._config = {
       ...this._config,
       tap_action: {
-        ...this._config.tap_action,
         action
       }
     };
 
     this._fireConfigChanged();
+    this.render(); // Re-render to show/hide dynamic fields
   }
-
-  _tapValueChanged(ev) {
+  
+  _handleTapValueChange(ev) {
     if (!this._config || !this._config.tap_action || !this._hass) return;
 
     const target = ev.target;
@@ -490,16 +565,25 @@ class ReolinkRecordingCardEditor extends HTMLElement {
 customElements.define('reolink-recording-card', ReolinkRecordingCard);
 customElements.define('reolink-recording-card-editor', ReolinkRecordingCardEditor);
 
-// Tell Home Assistant about the card
-window.customCards = window.customCards || [];
-window.customCards.push({
-  type: 'reolink-recording-card',
-  name: 'Reolink Recording Card',
-  description: 'A card to display Reolink camera recordings with auto-refresh'
+// More robust registration with Home Assistant
+// Wait for the window to fully load before registering the card
+window.addEventListener('load', () => {
+  // Small delay to ensure Home Assistant frontend is fully initialized
+  setTimeout(() => {
+    // Tell Home Assistant about the card
+    window.customCards = window.customCards || [];
+    window.customCards.push({
+      type: 'reolink-recording-card',
+      name: 'Reolink Recording Card',
+      description: 'A card to display Reolink camera recordings with auto-refresh'
+    });
+    
+    console.info(
+      '%c REOLINK-RECORDING-CARD %c v1.0.0 ',
+      'color: orange; font-weight: bold; background: black',
+      'color: white; font-weight: bold; background: dimgray'
+    );
+    
+    console.info('Reolink Recording Card successfully registered with Home Assistant');
+  }, 100); // Small delay to ensure proper registration timing
 });
-
-console.info(
-  '%c REOLINK-RECORDING-CARD %c v1.0.0 ',
-  'color: orange; font-weight: bold; background: black',
-  'color: white; font-weight: bold; background: dimgray'
-);
