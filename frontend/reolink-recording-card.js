@@ -82,8 +82,14 @@ class ReolinkRecordingCard extends HTMLElement {
     }
 
     const attributes = entity.attributes;
-    const title = this._config.title || attributes.friendly_name || entity.entity_id;
-    const showTitle = this._config.show_title !== false;
+    // Force a clear title value with debugging
+    const entityName = entity.entity_id.split('.')[1].replace(/_/g, ' ');
+    const friendlyName = attributes.friendly_name || entityName;
+    const title = this._config.title || friendlyName;
+    
+    console.log('Reolink Card - Title:', title, 'Entity:', entity.entity_id);
+    
+    const showTitle = true; // Always show title
     const showState = this._config.show_state !== false;
     
     // Cache busting with timestamp
@@ -106,6 +112,35 @@ class ReolinkRecordingCard extends HTMLElement {
         ha-card {
           overflow: hidden;
           padding: 0;
+          border: none;
+          background: transparent;
+          box-shadow: none;
+        }
+        .camera-name-overlay {
+          position: absolute;
+          top: 0;
+          left: 0;
+          background-color: rgba(0, 0, 0, 0.6);
+          color: white;
+          font-size: 1.6em;
+          font-weight: 600;
+          padding: 8px 12px;
+          text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.8);
+          border-bottom-right-radius: 8px;
+          z-index: 10;
+        }
+        
+        .state-info-overlay {
+          position: absolute;
+          bottom: 0;
+          left: 0;
+          right: 0;
+          background: linear-gradient(to top, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.3) 70%, rgba(0,0,0,0) 100%);
+          color: white;
+          padding: 10px 12px;
+          font-size: 0.9em;
+          text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.7);
+          z-index: 5;
         }
         .image-container {
           position: relative;
@@ -139,17 +174,15 @@ class ReolinkRecordingCard extends HTMLElement {
           height: 36px;
           fill: white;
         }
-        .header {
-          padding: 16px 16px 8px;
-        }
-        .title {
-          font-size: 1.2em;
-          font-weight: 500;
-          margin: 0;
-        }
         .state-info {
-          padding: 8px 16px 16px;
-          color: var(--secondary-text-color);
+          position: absolute;
+          bottom: 0;
+          left: 0;
+          right: 0;
+          background: linear-gradient(to top, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.3) 70%, rgba(0,0,0,0) 100%);
+          color: white;
+          padding: 10px;
+          text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
         }
         .no-image {
           background-color: var(--secondary-background-color);
@@ -162,15 +195,23 @@ class ReolinkRecordingCard extends HTMLElement {
       </style>
 
       <ha-card>
-        ${showTitle ? `
-          <div class="header">
-            <h2 class="title">${title}</h2>
-          </div>
-        ` : ''}
-
+        <!-- Image container with overlaid text -->
         <div class="image-container">
           ${imageUrl ? `
             <img src="${imageUrl}" alt="${title}" />
+            
+            <!-- Overlaid camera name at top -->
+            <div class="camera-name-overlay">📹 ${title}</div>
+            
+            <!-- Overlaid state info at bottom -->
+            ${showState ? `
+              <div class="state-info-overlay">
+                <div>State: ${entity.state}</div>
+                ${attributes.last_motion ? `<div>Last Motion: ${attributes.last_motion}</div>` : ''}
+                ${attributes.timestamp ? `<div>Timestamp: ${attributes.timestamp}</div>` : ''}
+              </div>
+            ` : ''}
+            
             <div class="play-icon">
               <svg viewBox="0 0 24 24">
                 <path d="M8,5.14V19.14L19,12.14L8,5.14Z" />
@@ -180,14 +221,6 @@ class ReolinkRecordingCard extends HTMLElement {
             <div class="no-image">No image available</div>
           `}
         </div>
-
-        ${showState ? `
-          <div class="state-info">
-            <div>State: ${entity.state}</div>
-            ${attributes.last_motion ? `<div>Last Motion: ${attributes.last_motion}</div>` : ''}
-            ${attributes.timestamp ? `<div>Timestamp: ${attributes.timestamp}</div>` : ''}
-          </div>
-        ` : ''}
       </ha-card>
     `;
 
