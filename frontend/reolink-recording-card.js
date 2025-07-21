@@ -15,6 +15,7 @@ class ReolinkRecordingCard extends HTMLElement {
       refresh_interval: 60,
       show_title: true,
       show_state: true,
+      use_jpg: false,
       tap_action: { action: 'url' }
     };
   }
@@ -87,7 +88,17 @@ class ReolinkRecordingCard extends HTMLElement {
     
     // Cache busting with timestamp
     const timestamp = Date.now();
-    const imageUrl = attributes.entity_picture ? `${attributes.entity_picture}&t=${timestamp}` : null;
+    
+    // Choose between GIF and JPG based on configuration
+    let imageUrl = null;
+    if (this._config.use_jpg && attributes.jpg_picture) {
+      // Use JPG if configured and available
+      imageUrl = `${attributes.jpg_picture}&t=${timestamp}`;
+    } else {
+      // Otherwise use default entity_picture (usually GIF)
+      imageUrl = attributes.entity_picture ? `${attributes.entity_picture}&t=${timestamp}` : null;
+    }
+    
     const videoUrl = attributes.media_url ? `${attributes.media_url}&t=${timestamp}` : null;
 
     this.shadowRoot.innerHTML = `
@@ -402,6 +413,10 @@ class ReolinkRecordingCardEditor extends HTMLElement {
     // Show state checkbox
     const showStateRow = this._createSwitchRow('Show State', 'show_state', this._config.show_state !== false);
     form.appendChild(showStateRow);
+    
+    // Use JPG checkbox
+    const useJpgRow = this._createSwitchRow('Use JPG Instead of GIF', 'use_jpg', this._config.use_jpg === true);
+    form.appendChild(useJpgRow);
     
     // Tap action selection
     const tapActionRow = this._createRow('Tap Action', '');
