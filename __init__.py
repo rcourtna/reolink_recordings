@@ -58,9 +58,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry=entry,  # Pass the entire config entry for access to options
     )
 
-    # Skip initial data fetch on startup for performance reasons
-    # Data will be fetched on first scheduled scan_interval or manual refresh
-    # await coordinator.async_refresh()
+    # Initial data fetch on startup to ensure sensors have data
+    # Without this, sensors may show as "unavailable" until the first scheduled refresh
+    await coordinator.async_refresh()
 
     # Set up periodic update
     entry.async_on_unload(
