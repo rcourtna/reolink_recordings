@@ -296,11 +296,25 @@ class ReolinkRecordingsCoordinator:
         # Extract recording details
         title_parts = latest_recording["title"].split(" ")
         timestamp = title_parts[0] if len(title_parts) > 0 else "Unknown"
-        event_type = title_parts[1] if len(title_parts) > 1 else "Unknown"
+        
+        # The second part is the duration
+        recording_duration = title_parts[1] if len(title_parts) > 1 else "Unknown"
+        
+        # Check for event type in the remaining parts of the title
+        # Format may be like: "17:21:21 0:00:12 Motion Person" or just "17:21:21 0:00:12"
+        if len(title_parts) > 2:
+            # Join all parts after the timestamp and duration to get the full event type
+            event_type = " ".join(title_parts[2:])
+        else:
+            # If no specific event type found, default to Motion
+            event_type = "Motion"  # Default event type
+            
+        _LOGGER.debug(f"Parsed recording title: '{latest_recording['title']}' → timestamp: '{timestamp}', duration: '{recording_duration}', event_type: '{event_type}'")
+        
         
         # Create a unique identifier for this recording
         # This will be used to determine if we already have this recording
-        recording_id = f"{camera_index}_{timestamp}_{event_type}_{latest_recording.get('duration', 'Unknown')}"
+        recording_id = f"{camera_index}_{timestamp}_{recording_duration}_{latest_recording.get('duration', 'Unknown')}"
         
         # Return the recording details
         return {
@@ -308,8 +322,8 @@ class ReolinkRecordingsCoordinator:
             "camera_index": camera_index,  # Include the camera index for consistent mapping
             "date": latest_date["title"],
             "timestamp": timestamp,
-            "event_type": event_type,
-            "duration": latest_recording.get("duration", "Unknown"),
+            "event_type": event_type,  # Now correctly set to 'Motion' by default
+            "duration": recording_duration,  # Now using the value from title_parts[1]
             "media_content_id": latest_recording["media_content_id"],
             "media_content_type": latest_recording["media_content_type"],
             "recording_id": recording_id,  # Add unique identifier

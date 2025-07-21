@@ -7,6 +7,7 @@ A custom component that fetches and downloads the latest recordings from your Re
 - Automatically discovers and downloads the latest recordings from all your Reolink cameras
 - Makes recordings available via `/local/` URLs for reliable access
 - Creates sensors with attributes containing recording details
+- Detects specific event types (Motion, Person, Vehicle, Animal) from recording metadata
 - Uses fixed filenames for latest recordings to simplify dashboard usage
 - Enables auto-refreshing images on your dashboard
 - Provides tap-to-expand functionality for quick viewing
@@ -154,6 +155,30 @@ Downloads a recording from a specific camera.
 Parameters:
 - `camera_name`: Name of the camera
 - `entity_id`: Optional, the entity ID of this integration
+
+## Sensor Data and Attributes
+
+Each camera creates a sensor entity with the format `sensor.camera_name_latest_recording` that provides useful data:
+
+### Sensor State
+The sensor state combines the recording date, timestamp, and event type in a format like:
+```
+2025/7/20 17:21:21 - Motion Person
+```
+
+### Available Attributes
+Each sensor has these attributes:
+- `date`: The recording date (e.g., "2025/7/20")
+- `timestamp`: The recording time (e.g., "17:21:21")
+- `duration`: The recording duration (e.g., "0:00:12")
+- `event_type`: The detected event type (e.g., "Motion", "Motion Person", "Vehicle", "Animal")
+- `file_path`: Full path to the recording file
+- `file_name`: Name of the recording file
+- `media_url`: URL to access the media with cache-busting parameter
+- `entity_picture`: URL to the snapshot image (GIF or JPG based on configuration)
+- `jpg_picture`: URL to the JPG snapshot (when using both GIF and JPG format)
+
+These attributes can be used in automations, templates, and dashboard cards.
 
 ## Viewing Recordings
 
