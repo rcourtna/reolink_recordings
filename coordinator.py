@@ -630,9 +630,9 @@ class ReolinkRecordingsCoordinator:
         """
         import subprocess, shlex
         
-        # Generate a single frame JPG snapshot from the middle of the first 10 seconds
+        # Generate a single frame JPG snapshot from the beginning of the video
         # Using higher resolution (1024px width) and maximum quality (-q:v 1)
-        cmd = f"ffmpeg -y -ss 5 -t 1 -i {shlex.quote(str(video_path))} -vframes 1 -q:v 1 -vf scale=1024:-1 {shlex.quote(str(snapshot_path))}"
+        cmd = f"ffmpeg -y -ss 0 -t 1 -i {shlex.quote(str(video_path))} -vframes 1 -q:v 1 -vf scale=1024:-1 {shlex.quote(str(snapshot_path))}"
         proc = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
         await proc.communicate()
         if proc.returncode != 0:
