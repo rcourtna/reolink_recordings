@@ -116,19 +116,7 @@ class ReolinkRecordingCard extends HTMLElement {
           background: transparent;
           box-shadow: none;
         }
-        .camera-name-overlay {
-          position: absolute;
-          top: 0;
-          left: 0;
-          background-color: rgba(0, 0, 0, 0.6);
-          color: white;
-          font-size: 1.6em;
-          font-weight: 600;
-          padding: 8px 12px;
-          text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.8);
-          border-bottom-right-radius: 8px;
-          z-index: 10;
-        }
+        /* Main container styles */
         
         .state-info-overlay {
           position: absolute;
@@ -141,6 +129,16 @@ class ReolinkRecordingCard extends HTMLElement {
           font-size: 0.9em;
           text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.7);
           z-index: 5;
+          display: flex;
+          justify-content: space-between;
+        }
+        .bottom-left {
+          font-weight: 500;
+          text-align: left;
+        }
+        .bottom-right {
+          font-weight: 400;
+          text-align: right;
         }
         .image-container {
           position: relative;
@@ -200,15 +198,12 @@ class ReolinkRecordingCard extends HTMLElement {
           ${imageUrl ? `
             <img src="${imageUrl}" alt="${title}" />
             
-            <!-- Overlaid camera name at top -->
-            <div class="camera-name-overlay">📹 ${title}</div>
             
             <!-- Overlaid state info at bottom -->
             ${showState ? `
               <div class="state-info-overlay">
-                <div>State: ${entity.state}</div>
-                ${attributes.last_motion ? `<div>Last Motion: ${attributes.last_motion}</div>` : ''}
-                ${attributes.timestamp ? `<div>Timestamp: ${attributes.timestamp}</div>` : ''}
+                <div class="bottom-left">${title}: ${attributes.event_type || 'Motion'}</div>
+                <div class="bottom-right">${attributes.timestamp || ''}</div>
               </div>
             ` : ''}
             
