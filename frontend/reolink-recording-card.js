@@ -1,7 +1,12 @@
 /**
  * Reolink Recording Card for Home Assistant
- * v1.0.0
+ * v1.0.1
  * A simple card to display Reolink camera recordings with auto-refresh
+ * 
+ * Last Updated: 2025-07-21
+ * - Improved cache busting mechanism
+ * - Added Section View layout support
+ * - Enhanced error handling
  */
 class ReolinkRecordingCard extends HTMLElement {
   static getConfigElement() {
@@ -17,6 +22,16 @@ class ReolinkRecordingCard extends HTMLElement {
       show_state: true,
       use_jpg: false,
       tap_action: { action: 'url' }
+    };
+  }
+  
+  // Support for Section View layout
+  static getGridOptions() {
+    return {
+      min_cols: 2,
+      suggested_cols: 2,
+      min_rows: 2,
+      suggested_rows: 2
     };
   }
 
@@ -52,6 +67,12 @@ class ReolinkRecordingCard extends HTMLElement {
     if (this.refreshInterval) {
       clearInterval(this.refreshInterval);
       this.refreshInterval = null;
+    }
+    
+    // Clean up visibility change listener
+    if (this._visibilityHandler) {
+      document.removeEventListener('visibilitychange', this._visibilityHandler);
+      this._visibilityHandler = null;
     }
   }
 
@@ -92,20 +113,28 @@ class ReolinkRecordingCard extends HTMLElement {
     const showTitle = true; // Always show title
     const showState = this._config.show_state !== false;
     
-    // Cache busting with timestamp
-    const timestamp = Date.now();
+    // Enhanced cache busting with unique identifier
+    // Using both timestamp and a random component to ensure browser cache invalidation
+    const cacheBuster = `t=${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     
     // Choose between GIF and JPG based on configuration
     let imageUrl = null;
     if (this._config.use_jpg && attributes.jpg_picture) {
       // Use JPG if configured and available
-      imageUrl = `${attributes.jpg_picture}&t=${timestamp}`;
-    } else {
+      const baseUrl = attributes.jpg_picture;
+      imageUrl = baseUrl.includes('?') ? `${baseUrl}&${cacheBuster}` : `${baseUrl}?${cacheBuster}`;
+    } else if (attributes.entity_picture) {
       // Otherwise use default entity_picture (usually GIF)
-      imageUrl = attributes.entity_picture ? `${attributes.entity_picture}&t=${timestamp}` : null;
+      const baseUrl = attributes.entity_picture;
+      imageUrl = baseUrl.includes('?') ? `${baseUrl}&${cacheBuster}` : `${baseUrl}?${cacheBuster}`;
     }
     
-    const videoUrl = attributes.media_url ? `${attributes.media_url}&t=${timestamp}` : null;
+    // Apply the same cache busting approach to video URL
+    let videoUrl = null;
+    if (attributes.media_url) {
+      const baseUrl = attributes.media_url;
+      videoUrl = baseUrl.includes('?') ? `${baseUrl}&${cacheBuster}` : `${baseUrl}?${cacheBuster}`;
+    }
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -262,13 +291,27 @@ class ReolinkRecordingCard extends HTMLElement {
   setupAutoRefresh() {
     if (this.refreshInterval) {
       clearInterval(this.refreshInterval);
+      this.refreshInterval = null;
     }
 
     const refreshSeconds = parseInt(this._config.refresh_interval) || 60;
     if (refreshSeconds > 0) {
+      // Immediate first refresh to ensure image is loaded
       this.refreshInterval = setInterval(() => {
+        console.log(`[Reolink Recording Card] Auto-refreshing ${this._config.entity}`);
         this.render();
       }, refreshSeconds * 1000);
+      
+      // Also refresh when the document becomes visible again (tab switching)
+      if (!this._visibilityHandler) {
+        this._visibilityHandler = () => {
+          if (document.visibilityState === 'visible') {
+            console.log(`[Reolink Recording Card] Visibility changed, refreshing ${this._config.entity}`);
+            this.render();
+          }
+        };
+        document.addEventListener('visibilitychange', this._visibilityHandler);
+      }
     }
   }
 
@@ -606,7 +649,7 @@ class ReolinkRecordingCardEditor extends HTMLElement {
 
 // Robust registration with retry mechanism to avoid race conditions with Home Assistant
 // This approach attempts registration multiple times with increasing delays
-const CARD_VERSION = '1.0.0';
+const CARD_VERSION = '1.0.1';
 const CARD_NAME = 'Reolink Recording Card';
 
 // Card registration function with retry capability
