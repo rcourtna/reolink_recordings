@@ -736,8 +736,12 @@ const registerCard = (function() {
 })();
 
 // Register the custom elements
-customElements.define('reolink-recording-card', ReolinkRecordingCard);
-customElements.define('reolink-recording-card-editor', ReolinkRecordingCardEditor);
+if (!customElements.get('reolink-recording-card')) {
+  customElements.define('reolink-recording-card', ReolinkRecordingCard);
+}
+if (!customElements.get('reolink-recording-card-editor')) {
+  customElements.define('reolink-recording-card-editor', ReolinkRecordingCardEditor);
+}
 
 // Wait for the window to fully load before starting registration
 window.addEventListener('load', () => {
