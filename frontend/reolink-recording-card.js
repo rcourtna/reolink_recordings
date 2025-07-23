@@ -1,12 +1,15 @@
 /**
  * Reolink Recording Card for Home Assistant
- * v1.0.1
+ * v1.1.0
  * A simple card to display Reolink camera recordings with auto-refresh
  * 
- * Last Updated: 2025-07-21
- * - Improved cache busting mechanism
- * - Added Section View layout support
- * - Enhanced error handling
+ * Last Updated: 2025-07-23
+ * - Separated card structure rendering from image updates for better performance
+ * - Added loading states and error handling for improved user experience
+ * - Implemented lazy loading and viewport detection
+ * - Intelligent cache busting that works with backend timestamps
+ * - Staggered refreshes to prevent multiple cards refreshing simultaneously
+ * - Added support for loading="lazy" attribute for improved page load times
  */
 class ReolinkRecordingCard extends HTMLElement {
   static getConfigElement() {
@@ -41,6 +44,9 @@ class ReolinkRecordingCard extends HTMLElement {
     this._config = {};
     this._hass = null;
     this.refreshInterval = null;
+    this.isLoading = false;
+    this.loadError = false;
+    this.cardRendered = false;
   }
 
   setConfig(config) {
@@ -80,186 +86,309 @@ class ReolinkRecordingCard extends HTMLElement {
     if (!this._hass || !this._config) return;
 
     if (!this._config.entity) {
-      this.shadowRoot.innerHTML = `
-        <ha-card>
-          <div style="padding: 16px; color: var(--error-color)">
-            Please define an entity
-          </div>
-        </ha-card>
-      `;
+      this.renderError('Please define an entity');
       return;
     }
 
     const entity = this._hass.states[this._config.entity];
     if (!entity) {
-      this.shadowRoot.innerHTML = `
-        <ha-card>
-          <div style="padding: 16px; color: var(--error-color)">
-            Entity not found: ${this._config.entity}
-          </div>
-        </ha-card>
-      `;
+      this.renderError(`Entity not found: ${this._config.entity}`);
       return;
     }
 
     const attributes = entity.attributes;
-    // Force a clear title value with debugging
     const entityName = entity.entity_id.split('.')[1].replace(/_/g, ' ');
     const friendlyName = attributes.friendly_name || entityName;
     const title = this._config.title || friendlyName;
     
-    console.log('Reolink Card - Title:', title, 'Entity:', entity.entity_id);
-    
-    const showTitle = true; // Always show title
     const showState = this._config.show_state !== false;
     
-    // Enhanced cache busting with unique identifier
-    // Using both timestamp and a random component to ensure browser cache invalidation
-    const cacheBuster = `t=${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    // Parse timestamp from attributes if available
+    let existingTimestamp = '';
+    if (attributes.entity_picture && attributes.entity_picture.includes('t=')) {
+      const matches = attributes.entity_picture.match(/[?&]t=([^&]+)/);
+      if (matches) {
+        existingTimestamp = matches[1];
+      }
+    }
     
     // Choose between GIF and JPG based on configuration
     let imageUrl = null;
-    if (this._config.use_jpg && attributes.jpg_picture) {
-      // Use JPG if configured and available
-      const baseUrl = attributes.jpg_picture;
-      imageUrl = baseUrl.includes('?') ? `${baseUrl}&${cacheBuster}` : `${baseUrl}?${cacheBuster}`;
-    } else if (attributes.entity_picture) {
-      // Otherwise use default entity_picture (usually GIF)
-      const baseUrl = attributes.entity_picture;
-      imageUrl = baseUrl.includes('?') ? `${baseUrl}&${cacheBuster}` : `${baseUrl}?${cacheBuster}`;
-    }
-    
-    // Apply the same cache busting approach to video URL
     let videoUrl = null;
-    if (attributes.media_url) {
-      const baseUrl = attributes.media_url;
-      videoUrl = baseUrl.includes('?') ? `${baseUrl}&${cacheBuster}` : `${baseUrl}?${cacheBuster}`;
-    }
-
-    this.shadowRoot.innerHTML = `
-      <style>
-        ha-card {
-          overflow: hidden;
-          padding: 0;
-          border: none;
-          background: transparent;
-          box-shadow: none;
-        }
-        /* Main container styles */
-        
-        .state-info-overlay {
-          position: absolute;
-          bottom: 0;
-          left: 0;
-          right: 0;
-          background: linear-gradient(to top, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.3) 70%, rgba(0,0,0,0) 100%);
-          color: white;
-          padding: 10px 12px;
-          font-size: 0.9em;
-          text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.7);
-          z-index: 5;
-          display: flex;
-          justify-content: space-between;
-        }
-        .bottom-left {
-          font-weight: 500;
-          text-align: left;
-        }
-        .bottom-right {
-          font-weight: 400;
-          text-align: right;
-        }
-        .image-container {
-          position: relative;
-          width: 100%;
-          cursor: pointer;
-        }
-        img {
-          width: 100%;
-          display: block;
-        }
-        .play-icon {
-          position: absolute;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%);
-          opacity: 0;
-          background-color: rgba(0, 0, 0, 0.6);
-          border-radius: 50%;
-          width: 60px;
-          height: 60px;
-          display: flex;
-          justify-content: center;
-          align-items: center;
-          transition: opacity 0.3s;
-        }
-        .image-container:hover .play-icon {
-          opacity: 1;
-        }
-        .play-icon svg {
-          width: 36px;
-          height: 36px;
-          fill: white;
-        }
-        .state-info {
-          position: absolute;
-          bottom: 0;
-          left: 0;
-          right: 0;
-          background: linear-gradient(to top, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.3) 70%, rgba(0,0,0,0) 100%);
-          color: white;
-          padding: 10px;
-          text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
-        }
-        .no-image {
-          background-color: var(--secondary-background-color);
-          color: var(--secondary-text-color);
-          height: 150px;
-          display: flex;
-          justify-content: center;
-          align-items: center;
-        }
-      </style>
-
-      <ha-card>
-        <!-- Image container with overlaid text -->
-        <div class="image-container">
-          ${imageUrl ? `
-            <img src="${imageUrl}" alt="${title}" />
-            
-            
-            <!-- Overlaid state info at bottom -->
-            ${showState ? `
-              <div class="state-info-overlay">
-                <div class="bottom-left">${title}: ${attributes.event_type || 'Motion'}</div>
-                <div class="bottom-right">${attributes.timestamp || ''}</div>
-              </div>
-            ` : ''}
-            
-            <div class="play-icon">
-              <svg viewBox="0 0 24 24">
-                <path d="M8,5.14V19.14L19,12.14L8,5.14Z" />
-              </svg>
-            </div>
-          ` : `
-            <div class="no-image">No image available</div>
-          `}
-        </div>
-      </ha-card>
-    `;
-
-    // Add click handler
-    if (videoUrl) {
-      const card = this.shadowRoot.querySelector('.image-container');
-      if (card) {
-        card.addEventListener('click', () => {
-          this.handleTap(videoUrl);
-        });
+    
+    // Only generate image URLs on first render or when refreshing
+    if (!this.cardRendered || this.isLoading) {
+      // Use existing timestamp if available, otherwise generate one
+      const cacheBuster = existingTimestamp || `t=${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      
+      if (this._config.use_jpg && attributes.jpg_picture) {
+        // Use JPG if configured and available
+        const baseUrl = attributes.jpg_picture;
+        imageUrl = baseUrl.includes('?') ? `${baseUrl}&${cacheBuster}` : `${baseUrl}?${cacheBuster}`;
+      } else if (attributes.entity_picture) {
+        // Otherwise use default entity_picture (usually GIF)
+        const baseUrl = attributes.entity_picture;
+        imageUrl = baseUrl.includes('?') ? `${baseUrl}&${cacheBuster}` : `${baseUrl}?${cacheBuster}`;
+      }
+      
+      // Apply the same cache busting approach to video URL
+      if (attributes.media_url) {
+        const baseUrl = attributes.media_url;
+        videoUrl = baseUrl.includes('?') ? `${baseUrl}&${cacheBuster}` : `${baseUrl}?${cacheBuster}`;
       }
     }
 
-    // Set up auto-refresh
-    this.setupAutoRefresh();
+    // Only render the card structure once unless the entity changes
+    if (!this.cardRendered) {
+      console.log(`Reolink Card - Initial render for ${title}`);
+      this.shadowRoot.innerHTML = `
+        <style>
+          ha-card {
+            overflow: hidden;
+            padding: 0;
+            border: none;
+            background: transparent;
+            box-shadow: none;
+          }
+          
+          .state-info-overlay {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(to top, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.3) 70%, rgba(0,0,0,0) 100%);
+            color: white;
+            padding: 10px 12px;
+            font-size: 0.9em;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.7);
+            z-index: 5;
+            display: flex;
+            justify-content: space-between;
+          }
+          .bottom-left {
+            font-weight: 500;
+            text-align: left;
+          }
+          .bottom-right {
+            font-weight: 400;
+            text-align: right;
+          }
+          .image-container {
+            position: relative;
+            width: 100%;
+            cursor: pointer;
+            min-height: 150px;
+          }
+          .reolink-image {
+            width: 100%;
+            display: block;
+          }
+          .play-icon {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            opacity: 0;
+            background-color: rgba(0, 0, 0, 0.6);
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: opacity 0.3s;
+          }
+          .image-container:hover .play-icon {
+            opacity: 1;
+          }
+          .play-icon svg {
+            width: 36px;
+            height: 36px;
+            fill: white;
+          }
+          .loading-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: var(--secondary-background-color);
+            opacity: 0.8;
+          }
+          .loading-spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-radius: 50%;
+            border-top: 4px solid var(--primary-color);
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+          }
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+          .error-container {
+            background-color: var(--secondary-background-color);
+            color: var(--error-color);
+            height: 150px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 16px;
+            text-align: center;
+          }
+          .no-image {
+            background-color: var(--secondary-background-color);
+            color: var(--secondary-text-color);
+            height: 150px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+          }
+        </style>
+
+        <ha-card>
+          <div class="image-container">
+            ${imageUrl ? `
+              <!-- Using loading="lazy" attribute for image lazy loading -->
+              <img 
+                class="reolink-image" 
+                src="${imageUrl}" 
+                alt="${title}" 
+                loading="lazy"
+                @load="${this.onImageLoaded.bind(this)}" 
+                @error="${this.onImageError.bind(this)}" />
+              
+              <!-- Overlaid state info at bottom -->
+              ${showState ? `
+                <div class="state-info-overlay">
+                  <div class="bottom-left">${title}: ${attributes.event_type || 'Motion'}</div>
+                  <div class="bottom-right">${attributes.timestamp || ''}</div>
+                </div>
+              ` : ''}
+              
+              <div class="play-icon">
+                <svg viewBox="0 0 24 24">
+                  <path d="M8,5.14V19.14L19,12.14L8,5.14Z" />
+                </svg>
+              </div>
+              
+              <div class="loading-container" id="loading-spinner">
+                <div class="loading-spinner"></div>
+              </div>
+            ` : `
+              <div class="no-image">No image available</div>
+            `}
+            
+            <div id="error-message" class="error-container" style="display: none;">
+              Failed to load image
+            </div>
+          </div>
+        </ha-card>
+      `;
+      
+      // Flag that we've rendered the card structure
+      this.cardRendered = true;
+      
+      // Add event listeners for image loading
+      const img = this.shadowRoot.querySelector('.reolink-image');
+      if (img) {
+        img.addEventListener('load', this.onImageLoaded.bind(this));
+        img.addEventListener('error', this.onImageError.bind(this));
+      }
+      
+      // Add click handler
+      if (videoUrl) {
+        const card = this.shadowRoot.querySelector('.image-container');
+        if (card) {
+          card.addEventListener('click', () => {
+            this.handleTap(videoUrl);
+          });
+        }
+      }
+      
+      // Set up auto-refresh
+      this.setupAutoRefresh();
+    } else {
+      // If card is already rendered, only update the image URL and state info
+      this.updateImageSource(imageUrl, videoUrl, attributes, title, showState);
+    }
+  }
+
+  updateImageSource(imageUrl, videoUrl, attributes, title, showState) {
+    // Only update if we have new image URL
+    if (!imageUrl) return;
+    
+    // Show loading spinner
+    this.isLoading = true;
+    const loadingSpinner = this.shadowRoot.querySelector('#loading-spinner');
+    if (loadingSpinner) loadingSpinner.style.display = 'flex';
+    
+    // Hide error message if previously shown
+    const errorMessage = this.shadowRoot.querySelector('#error-message');
+    if (errorMessage) errorMessage.style.display = 'none';
+    
+    // Update image source
+    const img = this.shadowRoot.querySelector('.reolink-image');
+    if (img) {
+      console.log(`Updating image source for ${title}`);
+      img.src = imageUrl;
+    }
+    
+    // Update state info if needed
+    if (showState) {
+      const titleEl = this.shadowRoot.querySelector('.bottom-left');
+      const timestampEl = this.shadowRoot.querySelector('.bottom-right');
+      
+      if (titleEl) titleEl.textContent = `${title}: ${attributes.event_type || 'Motion'}`;
+      if (timestampEl) timestampEl.textContent = attributes.timestamp || '';
+    }
+    
+    // Update video URL for tap action if available
+    if (videoUrl) {
+      const card = this.shadowRoot.querySelector('.image-container');
+      if (card) {
+        const oldHandler = card.onclick;
+        card.onclick = () => this.handleTap(videoUrl);
+      }
+    }
+  }
+
+  onImageLoaded() {
+    console.log('Image loaded successfully');
+    this.isLoading = false;
+    this.loadError = false;
+    
+    // Hide loading spinner
+    const loadingSpinner = this.shadowRoot.querySelector('#loading-spinner');
+    if (loadingSpinner) loadingSpinner.style.display = 'none';
+  }
+
+  onImageError() {
+    console.error('Failed to load image');
+    this.isLoading = false;
+    this.loadError = true;
+    
+    // Hide loading spinner
+    const loadingSpinner = this.shadowRoot.querySelector('#loading-spinner');
+    if (loadingSpinner) loadingSpinner.style.display = 'none';
+    
+    // Show error message
+    const errorMessage = this.shadowRoot.querySelector('#error-message');
+    if (errorMessage) errorMessage.style.display = 'flex';
+  }
+
+  renderError(message) {
+    this.shadowRoot.innerHTML = `
+      <ha-card>
+        <div style="padding: 16px; color: var(--error-color)">
+          ${message}
+        </div>
+      </ha-card>
+    `;
   }
 
   handleTap(mediaUrl) {
@@ -296,23 +425,151 @@ class ReolinkRecordingCard extends HTMLElement {
 
     const refreshSeconds = parseInt(this._config.refresh_interval) || 60;
     if (refreshSeconds > 0) {
-      // Immediate first refresh to ensure image is loaded
-      this.refreshInterval = setInterval(() => {
-        console.log(`[Reolink Recording Card] Auto-refreshing ${this._config.entity}`);
-        this.render();
-      }, refreshSeconds * 1000);
+      // Add a small random offset to stagger refreshes across multiple cards (0-15% of refresh interval)
+      const maxOffset = Math.floor(refreshSeconds * 0.15) * 1000; // Convert to milliseconds
+      const staggerOffset = Math.floor(Math.random() * maxOffset);
+      
+      console.log(`[Reolink Recording Card] Setting up refresh for ${this._config.entity} with ${refreshSeconds}s interval and ${staggerOffset}ms stagger offset`);
+      
+      // Add a small initial delay for the first refresh to avoid page load congestion
+      setTimeout(() => {
+        // Only trigger a refresh if the card is visible in viewport
+        if (this.isElementInViewport() && document.visibilityState === 'visible') {
+          this.refreshImage();
+        }
+        
+        // Set up recurring refresh interval with stagger offset
+        this.refreshInterval = setInterval(() => {
+          // Only refresh if the card is visible in viewport and the tab is visible
+          if (this.isElementInViewport() && document.visibilityState === 'visible') {
+            console.log(`[Reolink Recording Card] Auto-refreshing ${this._config.entity}`);
+            this.refreshImage();
+          }
+        }, refreshSeconds * 1000);
+      }, staggerOffset);
       
       // Also refresh when the document becomes visible again (tab switching)
       if (!this._visibilityHandler) {
         this._visibilityHandler = () => {
           if (document.visibilityState === 'visible') {
             console.log(`[Reolink Recording Card] Visibility changed, refreshing ${this._config.entity}`);
-            this.render();
+            this.refreshImage();
           }
         };
         document.addEventListener('visibilitychange', this._visibilityHandler);
       }
+      
+      // Set up intersection observer for viewport detection
+      if (!this._intersectionObserver && 'IntersectionObserver' in window) {
+        this._intersectionObserver = new IntersectionObserver((entries) => {
+          const isVisible = entries[0].isIntersecting;
+          if (isVisible) {
+            console.log(`[Reolink Recording Card] Card ${this._config.entity} entered viewport, refreshing`);
+            this.refreshImage();
+          }
+        }, { threshold: 0.1 }); // Trigger when at least 10% of the card is visible
+        
+        // Start observing this element
+        this._intersectionObserver.observe(this);
+      }
     }
+  }
+  
+  /**
+   * Check if the element is currently visible in the viewport
+   */
+  isElementInViewport() {
+    // If we have an intersection observer, we don't need this method
+    if ('IntersectionObserver' in window) return true;
+    
+    // Fallback for browsers that don't support IntersectionObserver
+    const rect = this.getBoundingClientRect();
+    return (
+      rect.top >= 0 &&
+      rect.left >= 0 &&
+      rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) &&
+      rect.right <= (window.innerWidth || document.documentElement.clientWidth)
+    );
+  }
+  
+  /**
+   * Refresh just the image without redoing the entire card structure
+   */
+  refreshImage() {
+    if (!this._hass || !this._config || !this.cardRendered) return;
+    
+    // Get updated entity state
+    const entity = this._hass.states[this._config.entity];
+    if (!entity) return;
+    
+    const attributes = entity.attributes;
+    const entityName = entity.entity_id.split('.')[1].replace(/_/g, ' ');
+    const friendlyName = attributes.friendly_name || entityName;
+    const title = this._config.title || friendlyName;
+    const showState = this._config.show_state !== false;
+    
+    // Parse existing timestamp from URL if available
+    let existingTimestamp = '';
+    let urlHasTimestamp = false;
+    
+    if (attributes.entity_picture && attributes.entity_picture.includes('t=')) {
+      const matches = attributes.entity_picture.match(/[?&]t=([^&]+)/);
+      if (matches) {
+        existingTimestamp = matches[1];
+        urlHasTimestamp = true;
+        console.log(`[Reolink Recording Card] Found existing timestamp in URL: ${existingTimestamp}`);
+      }
+    }
+    
+    // Generate cache buster - use backend timestamp if available and recent, otherwise create new one
+    let cacheBuster;
+    if (urlHasTimestamp && existingTimestamp.includes('-')) {
+      // If the timestamp format is 'time-random', use as is
+      cacheBuster = `t=${existingTimestamp}`;
+    } else if (urlHasTimestamp) {
+      // If there's a timestamp but it doesn't have our format, check if it's recent enough
+      try {
+        const timestampMs = parseInt(existingTimestamp);
+        const now = Date.now();
+        const age = now - timestampMs;
+        
+        // If timestamp is less than 2 minutes old, use it; otherwise generate new one
+        if (!isNaN(age) && age < 120000) {
+          cacheBuster = `t=${existingTimestamp}`;
+        } else {
+          cacheBuster = `t=${now}-${Math.floor(Math.random() * 1000)}`;
+        }
+      } catch (e) {
+        // If parsing fails, generate a new timestamp
+        cacheBuster = `t=${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      }
+    } else {
+      // No existing timestamp, generate a new one
+      cacheBuster = `t=${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    }
+    
+    // Choose between GIF and JPG based on configuration
+    let imageUrl = null;
+    let videoUrl = null;
+    
+    if (this._config.use_jpg && attributes.jpg_picture) {
+      // Use JPG if configured and available
+      const baseUrl = attributes.jpg_picture;
+      imageUrl = baseUrl.includes('?') ? `${baseUrl}&${cacheBuster}` : `${baseUrl}?${cacheBuster}`;
+    } else if (attributes.entity_picture) {
+      // Otherwise use default entity_picture (usually GIF)
+      const baseUrl = attributes.entity_picture;
+      imageUrl = baseUrl.includes('?') ? `${baseUrl}&${cacheBuster}` : `${baseUrl}?${cacheBuster}`;
+    }
+    
+    // Apply the same cache busting approach to video URL
+    if (attributes.media_url) {
+      const baseUrl = attributes.media_url;
+      videoUrl = baseUrl.includes('?') ? `${baseUrl}&${cacheBuster}` : `${baseUrl}?${cacheBuster}`;
+    }
+    
+    // Update the image source and other card info
+    this.updateImageSource(imageUrl, videoUrl, attributes, title, showState);
   }
 
   fireEvent(type, detail) {
