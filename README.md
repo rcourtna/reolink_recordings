@@ -18,22 +18,19 @@ A custom component that fetches and downloads the latest recordings from your Re
 
 ## Installation
 
-### HACS Installation (Recommended)
-1. Make sure [HACS](https://hacs.xyz/) is installed in your Home Assistant instance
-2. Go to HACS → Integrations → Add Integration
-3. Search for "Reolink Recordings" and install it
-4. Restart Home Assistant
-
 ### Manual Installation
-1. Copy the `reolink_recordings` folder to your Home Assistant `custom_components` directory
-2. Restart Home Assistant
+1. Download the repository as a ZIP file and extract it
+2. Copy the `reolink_recordings` folder to your Home Assistant `custom_components` directory
+3. Restart Home Assistant
+
+> **Note:** HACS installation is not yet available for this component. It will be added in a future release.
 
 ## Configuration
 
 ### Through the UI
 1. Go to Settings → Devices & Services
 2. Click "+ Add Integration" button at the bottom right
-3. Search for "Reolink Recordings"
+3. Search for "Reolink Recordings" (after installing the component and restarting Home Assistant, it will appear in the integration list)
 4. Follow the configuration steps:
    - Name: A name for this integration
    - Host: Your Home Assistant URL (default: http://localhost:8123)
@@ -47,7 +44,6 @@ After setup, you can adjust these options:
 - Storage Path: Where to store downloaded recordings (should be set to `www/reolink_recordings` for proper functionality)
 - Snapshot Format: Choose between animated GIF, static JPG, or both for snapshots
 - Enable Caching: Toggle the caching system on/off (useful to disable during development/debugging)
-- Media Player Entity: The entity ID of the media player to use for browsing Reolink media sources
 
 ## Usage
 
@@ -74,7 +70,7 @@ tap_action:
 Replace:
 - `camera_name` with your camera's name (as it appears in the sensor name)
 
-#### Method 2: Using Picture Card with Auto-Refresh (Recommended)
+#### Method 2: Using Picture Card with Auto-Refresh
 
 This method displays an auto-refreshing snapshot from the latest recording with a tap-to-expand functionality:
 
@@ -118,9 +114,9 @@ tap_action:
 
 This will open the recording in your browser when tapped.
 
-#### Method 4: Using the Custom Reolink Recording Card (Best Experience)
+#### Method 4: Using the Custom Reolink Recording Card (Recommended)
 
-A custom Lovelace card has been created specifically for this integration:
+A custom Lovelace card has been created specifically for this integration and provides the best experience:
 
 1. Copy the `reolink-recording-card.js` file to your `www` directory
 2. Add it as a resource in your Lovelace configuration:
@@ -130,17 +126,23 @@ A custom Lovelace card has been created specifically for this integration:
 
 ```yaml
 type: custom:reolink-recording-card
-entity: sensor.front_door_latest_recording
+entity: sensor.first_landing_latest_recording
+title: First Landing
 refresh_interval: 60
+show_title: true
 show_state: true
+use_jpg: true
+tap_action:
+  action: url
 ```
 
 Features:
 - Auto-refreshes camera snapshots with configurable interval
-- Cache-busting to ensure fresh images
+- Built-in cache-busting to ensure fresh images (URLs already include timestamp parameters)
+- Configurable to use JPG images instead of GIFs for better performance
 - Clickable to open MP4 video in new tab
 - Shows camera state information and recording details
-- Hover effects with play overlay icon
+- Customizable tap action
 
 ### Services
 
