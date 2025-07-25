@@ -63,6 +63,9 @@ class ReolinkRecordingsCoordinator:
         # This is the key to fixing the camera mixup issue
         self.camera_index_map: Dict[int, str] = {}
         
+        # Store NVR ID for each camera index
+        self.camera_nvr_map: Dict[int, str] = {}
+        
         # Maps for snapshot paths
         self.snapshot_paths: Dict[str, str] = {}  # GIF paths
         self.jpg_snapshot_paths: Dict[str, str] = {}  # JPG paths
@@ -187,13 +190,16 @@ class ReolinkRecordingsCoordinator:
             # Extract actual camera index from media_content_id
             # Format is typically: media-source://reolink/CAM|{nvr_id}|{camera_index}
             try:
-                # Parse the media_content_id to extract the actual camera index
+                # Parse the media_content_id to extract the actual camera index and NVR ID
                 content_id_parts = camera["media_content_id"].split("|")
                 if len(content_id_parts) >= 3:
-                    # The third part should contain the actual camera index
+                    # Extract both NVR ID and camera index
+                    nvr_id = content_id_parts[1]
                     actual_camera_index = int(content_id_parts[2])
                     camera_name_to_index[camera_name] = actual_camera_index
-                    _LOGGER.info(f"Extracted camera index {actual_camera_index} for camera '{camera_name}' from content ID")
+                    # Store NVR ID for this camera index
+                    self.camera_nvr_map[actual_camera_index] = nvr_id
+                    _LOGGER.info(f"Extracted camera index {actual_camera_index} with NVR ID {nvr_id} for camera '{camera_name}'")
                 else:
                     _LOGGER.warning(f"Couldn't parse index from media_content_id: {camera['media_content_id']}")
             except (ValueError, IndexError) as e:
@@ -205,6 +211,7 @@ class ReolinkRecordingsCoordinator:
             self.camera_index_map[camera_index] = camera_name
             
         _LOGGER.info(f"Camera mapping complete: {self.camera_index_map}")
+        _LOGGER.info(f"NVR ID mapping complete: {self.camera_nvr_map}")
         
         # Process each camera using the correct indices
         for camera in root_result["children"]:
@@ -233,16 +240,12 @@ class ReolinkRecordingsCoordinator:
     ) -> Dict[str, Any]:
         """Get the latest recording for a specific camera index."""
         # Step 1: Get camera resolution options
-        # Extract NVR ID from the media_content_id for consistent use
-        nvr_id = "01JZW5GP7HJAVQNQXD498N4SKV"  # Default fallback
-        try:
-            # Get the NVR ID from an existing media content ID if possible
-            for child in self.hass.data.get(DOMAIN, {}).get("nvr_entities", []):
-                if hasattr(child, "media_content_id") and "|" in child.media_content_id:
-                    nvr_id = child.media_content_id.split("|")[1]
-                    break
-        except Exception as e:
-            _LOGGER.debug(f"Couldn't extract NVR ID from existing entities: {e}")
+        # Get NVR ID from our camera mapping
+        nvr_id = self.camera_nvr_map.get(camera_index)
+        
+        if not nvr_id:
+            _LOGGER.error(f"No NVR ID found for camera {camera_name} (index: {camera_index})")
+            return {"camera": camera_name, "error": "No NVR ID mapping found for this camera"}
             
         camera_path = f"media-source://reolink/CAM|{nvr_id}|{camera_index}"
         camera_result = await self._browse_media(camera_path, token)
