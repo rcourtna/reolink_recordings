@@ -475,6 +475,10 @@ class ReolinkRecordingsCoordinator:
 
                 _LOGGER.info(f"Downloaded recording for {camera_name} to {dest_path}")
                 
+            except asyncio.CancelledError:
+                _LOGGER.warning(f"Download cancelled for {camera_name} - this can happen during Home Assistant shutdown or network timeouts")
+                # Don't re-raise CancelledError here to allow other cameras to continue processing
+                continue
             except Exception as e:
                 _LOGGER.error(f"Error downloading recording for {camera_name}: {e}")
 
@@ -668,8 +672,26 @@ class ReolinkRecordingsCoordinator:
             
             download_time = time.time() - start_time
             _LOGGER.debug(f"Download completed: {file_size} bytes in {download_time:.2f} seconds ({file_size/download_time/1024:.2f} KB/s)")
+        except asyncio.CancelledError:
+            _LOGGER.warning(f"Download cancelled for {dest_path} - this can happen during Home Assistant shutdown or network timeouts")
+            # Clean up partial file if it exists
+            if os.path.exists(dest_path):
+                try:
+                    os.remove(dest_path)
+                    _LOGGER.debug(f"Cleaned up partial download file: {dest_path}")
+                except OSError as cleanup_error:
+                    _LOGGER.debug(f"Could not clean up partial file {dest_path}: {cleanup_error}")
+            # Re-raise the CancelledError so the caller knows the operation was cancelled
+            raise
         except Exception as e:
             _LOGGER.error(f"Download failed: {str(e)}")
+            # Clean up partial file if it exists
+            if os.path.exists(dest_path):
+                try:
+                    os.remove(dest_path)
+                    _LOGGER.debug(f"Cleaned up partial download file after error: {dest_path}")
+                except OSError as cleanup_error:
+                    _LOGGER.debug(f"Could not clean up partial file {dest_path}: {cleanup_error}")
             raise
     
     async def _save_metadata(self):
