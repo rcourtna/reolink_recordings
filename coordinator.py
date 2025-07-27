@@ -26,6 +26,10 @@ from .const import (
     DEFAULT_SNAPSHOT_FORMAT,
     CONF_ENABLE_CACHING,
     DEFAULT_ENABLE_CACHING,
+    CONF_RESOLUTION_PREFERENCE,
+    DEFAULT_RESOLUTION_PREFERENCE,
+    RESOLUTION_HIGH,
+    RESOLUTION_LOW,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -250,26 +254,45 @@ class ReolinkRecordingsCoordinator:
         camera_path = f"media-source://reolink/CAM|{nvr_id}|{camera_index}"
         camera_result = await self._browse_media(camera_path, token)
         
-        # Step 2: Get the highest resolution option (main)
+        # Step 2: Get the resolution option based on user preference
         if "children" not in camera_result or not camera_result["children"]:
             return {"camera": camera_name, "error": "No resolution options found"}
         
-        # Find the highest resolution option (main stream)
+        # Get resolution preference from config
+        resolution_preference = DEFAULT_RESOLUTION_PREFERENCE
+        if self.entry and CONF_RESOLUTION_PREFERENCE in self.entry.options:
+            resolution_preference = self.entry.options[CONF_RESOLUTION_PREFERENCE]
+        
+        # Choose stream based on resolution preference
+        selected_option = None
+        low_res_option = None
         high_res_option = None
+        
+        # Find both options if available
         for child in camera_result["children"]:
             if "main" in child["media_content_id"]:
                 high_res_option = child
-                break
+            elif "sub" in child["media_content_id"]:
+                low_res_option = child
         
-        # If main stream not found, try to find any available option
-        if not high_res_option and camera_result["children"]:
-            high_res_option = camera_result["children"][0]
+        # Select based on preference
+        if resolution_preference == RESOLUTION_HIGH:
+            selected_option = high_res_option or low_res_option
+        else:  # RESOLUTION_LOW
+            selected_option = low_res_option or high_res_option
         
-        if not high_res_option:
+        # If no specific option found, use the first available
+        if not selected_option and camera_result["children"]:
+            selected_option = camera_result["children"][0]
+            _LOGGER.warning(
+                f"Neither high nor low resolution stream found for {camera_name}, using first available option"
+            )
+        
+        if not selected_option:
             return {"camera": camera_name, "error": "No resolution options found"}
         
         # Step 3: Get available dates
-        res_result = await self._browse_media(high_res_option["media_content_id"], token)
+        res_result = await self._browse_media(selected_option["media_content_id"], token)
         
         if "children" not in res_result or not res_result["children"]:
             return {"camera": camera_name, "error": "No dates found"}

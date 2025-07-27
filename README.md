@@ -44,6 +44,7 @@ After setup, you can adjust these options:
 - Storage Path: Where to store downloaded recordings (should be set to `www/reolink_recordings` for proper functionality)
 - Snapshot Format: Choose between animated GIF, static JPG, or both for snapshots
 - Enable Caching: Toggle the caching system on/off (useful to disable during development/debugging)
+- Resolution Preference: Choose between high-resolution (default) or low-resolution streams when browsing recordings
 
 ## Usage
 

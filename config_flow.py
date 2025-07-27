@@ -27,6 +27,10 @@ from .const import (
     SNAPSHOT_FORMAT_BOTH,
     CONF_ENABLE_CACHING,
     DEFAULT_ENABLE_CACHING,
+    CONF_RESOLUTION_PREFERENCE,
+    DEFAULT_RESOLUTION_PREFERENCE,
+    RESOLUTION_HIGH,
+    RESOLUTION_LOW,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -89,7 +93,8 @@ class ReolinkRecordingsOptionsFlow(config_entries.OptionsFlow):
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         """Initialize options flow."""
-        self.config_entry = config_entry
+        # Store config_entry as self._config_entry which is the Home Assistant recommended pattern
+        self._config_entry = config_entry
         super().__init__()
 
     async def async_step_init(
@@ -99,7 +104,7 @@ class ReolinkRecordingsOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        current_options = self.config_entry.options
+        current_options = self._config_entry.options
         
         options = {
             vol.Optional(
@@ -130,6 +135,15 @@ class ReolinkRecordingsOptionsFlow(config_entries.OptionsFlow):
                     CONF_ENABLE_CACHING, DEFAULT_ENABLE_CACHING
                 ),
             ): bool,
+            vol.Optional(
+                CONF_RESOLUTION_PREFERENCE,
+                default=current_options.get(
+                    CONF_RESOLUTION_PREFERENCE, DEFAULT_RESOLUTION_PREFERENCE
+                ),
+            ): vol.In([
+                RESOLUTION_HIGH,
+                RESOLUTION_LOW
+            ]),
             # Media player option removed - always using direct API
         }
 
