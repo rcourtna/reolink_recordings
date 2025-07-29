@@ -1,10 +1,12 @@
 # Reolink Recordings for Home Assistant
 
-A custom component that fetches and downloads the latest recordings from your Reolink cameras, making them available as media sources in Home Assistant dashboards.
+A custom component that fetches and downloads the latest recordings from your **Reolink Home Hub** (which stores recordings from Reolink battery-powered cameras), making them available as media sources in Home Assistant dashboards.
+
+> **IMPORTANT**: This component only works with the **Reolink Home Hub** device and does not interact with Reolink cameras directly. The component interfaces with the Home Hub to access recordings that were previously captured and stored on the hub.
 
 ## Features
 
-- Automatically discovers and downloads the latest recordings from all your Reolink cameras
+- Automatically discovers and downloads the latest recordings stored in your Reolink Home Hub from connected battery-powered cameras
 - Makes recordings available via `/local/` URLs for reliable access
 - Creates sensors with attributes containing recording details
 - Detects specific event types (Motion, Person, Vehicle, Animal) from recording metadata
@@ -48,7 +50,7 @@ After setup, you can adjust these options:
 
 ## Usage
 
-### Adding recordings to your dashboard
+### Adding Home Hub recordings to your dashboard
 
 #### Method 1: Using the Picture Entity card (auto-refreshing)
 This method will show the latest recording frame and auto-refresh it.
@@ -150,10 +152,10 @@ Features:
 The integration provides these services:
 
 #### reolink_recordings.fetch_latest_recordings
-Manually triggers a refresh of all camera recordings.
+Manually triggers a refresh of all recordings stored on the Home Hub.
 
 #### reolink_recordings.download_recording
-Downloads a recording from a specific camera.
+Downloads a recording from the Home Hub for a specific camera.
 
 Parameters:
 - `camera_name`: Name of the camera
@@ -161,7 +163,7 @@ Parameters:
 
 ## Sensor Data and Attributes
 
-Each camera creates a sensor entity with the format `sensor.camera_name_latest_recording` that provides useful data:
+For each camera connected to your Home Hub, this integration creates a sensor entity with the format `sensor.camera_name_latest_recording` that provides useful data:
 
 ### Sensor State
 The sensor state combines the recording date, timestamp, and event type in a format like:
@@ -185,7 +187,7 @@ These attributes can be used in automations, templates, and dashboard cards.
 
 ## Viewing Recordings
 
-All recordings are stored in the `www/reolink_recordings/recordings` directory and can be accessed via `/local/reolink_recordings/recordings/` URLs. Each camera has fixed filenames for the latest recording (`camera_name_latest.mp4`), animated preview (`camera_name_latest.gif`), and snapshot (`camera_name_latest.jpg`) for easy reference in dashboards.
+All recordings downloaded from your Reolink Home Hub are stored in the `www/reolink_recordings/recordings` directory and can be accessed via `/local/reolink_recordings/recordings/` URLs. Each connected camera has fixed filenames for the latest recording (`camera_name_latest.mp4`), animated preview (`camera_name_latest.gif`), and snapshot (`camera_name_latest.jpg`) for easy reference in dashboards.
 
 ## Performance Optimizations
 
