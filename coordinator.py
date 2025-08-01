@@ -8,7 +8,7 @@ import websockets
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Union
 
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
@@ -297,13 +297,35 @@ class ReolinkRecordingsCoordinator:
         if "children" not in res_result or not res_result["children"]:
             return {"camera": camera_name, "error": "No dates found"}
         
-        # Sort dates in descending order to get the most recent first
-        dates = sorted(res_result["children"], key=lambda x: x["title"], reverse=True)
+        # Parse date strings into actual datetime objects for proper chronological sorting
+        def _parse_reolink_date(date_str: str) -> datetime:
+            """Parse a Reolink date format like '2025/7/9' into a datetime object."""
+            parts = date_str.split('/')
+            if len(parts) == 3:
+                try:
+                    return datetime(int(parts[0]), int(parts[1]), int(parts[2]))
+                except ValueError:
+                    _LOGGER.warning(f"Failed to parse date string: {date_str}")
+                    return datetime.min
+            _LOGGER.warning(f"Invalid date string format: {date_str}")
+            return datetime.min
+        
+        # Log all available dates for debugging
+        date_strings = [d["title"] for d in res_result["children"]]
+        _LOGGER.debug(f"Available dates for {camera_name}: {date_strings}")
+        
+        # Sort dates by actual datetime objects, not lexicographically
+        dates = sorted(
+            res_result["children"],
+            key=lambda x: _parse_reolink_date(x["title"]),
+            reverse=True  # Descending order (newest first)
+        )
         
         if not dates:
             return {"camera": camera_name, "error": "No dates available"}
         
         latest_date = dates[0]
+        _LOGGER.debug(f"Selected latest date for {camera_name}: {latest_date['title']}")
         
         # Step 4: Get recordings for the latest date
         date_result = await self._browse_media(latest_date["media_content_id"], token)
@@ -311,7 +333,15 @@ class ReolinkRecordingsCoordinator:
         if "children" not in date_result or not date_result["children"]:
             return {"camera": camera_name, "date": latest_date["title"], "error": "No recordings found"}
         
-        # Sort recordings by title (which contains the timestamp) to get the latest
+        # Log recordings found for debugging
+        if date_result["children"]:
+            _LOGGER.debug(f"Found {len(date_result['children'])} recordings for {camera_name} on {latest_date['title']}")
+            for rec in date_result["children"][:5]:  # Log first 5 recordings
+                _LOGGER.debug(f"Recording: {rec['title']}")
+        else:
+            _LOGGER.warning(f"No recordings found for {camera_name} on {latest_date['title']}")
+            
+        # Sort recordings by title (which contains the timestamp HH:MM:SS) to get the latest
         recordings = sorted(date_result["children"], key=lambda x: x["title"], reverse=True)
         
         if not recordings:
