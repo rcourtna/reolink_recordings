@@ -146,11 +146,11 @@ class ReolinkRecordingsCoordinator:
             }
             
             # TEMPORARY DEBUG: Log detailed data structure for debugging sensor issues
-            _LOGGER.warning("========== COORDINATOR DATA DEBUG ==========")
-            _LOGGER.warning(f"Complete data structure: {self.data}")
-            _LOGGER.warning(f"Recording paths: {self.recording_paths}")
-            _LOGGER.warning(f"GIF snapshot paths: {self.snapshot_paths}")
-            _LOGGER.warning(f"JPG snapshot paths: {self.jpg_snapshot_paths}")
+            _LOGGER.debug("========== COORDINATOR DATA DEBUG ==========")
+            _LOGGER.debug(f"Complete data structure: {self.data}")
+            _LOGGER.debug(f"Recording paths: {self.recording_paths}")
+            _LOGGER.debug(f"GIF snapshot paths: {self.snapshot_paths}")
+            _LOGGER.debug(f"JPG snapshot paths: {self.jpg_snapshot_paths}")
             
             # Save metadata
             await self._save_metadata()
