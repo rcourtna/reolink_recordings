@@ -1,6 +1,6 @@
 /**
  * Reolink Recording Card for Home Assistant
- * v1.1.0
+ * v1.1.1
  * A simple card to display Reolink camera recordings with auto-refresh
  */
 class ReolinkRecordingCard extends HTMLElement {
@@ -77,23 +77,31 @@ class ReolinkRecordingCard extends HTMLElement {
   }
 
   render() {
-    if (!this._hass || !this._config) return;
+    try {
+      if (!this._hass || !this._config) {
+        console.log('Reolink Card: Waiting for hass or config to be available');
+        return;
+      }
 
-    if (!this._config.entity) {
-      this.renderError('Please define an entity');
-      return;
-    }
+      if (!this._config.entity) {
+        console.warn('Reolink Card: No entity configured');
+        this.renderError('Please define an entity');
+        return;
+      }
 
-    const entity = this._hass.states[this._config.entity];
-    if (!entity) {
-      this.renderError(`Entity not found: ${this._config.entity}`);
-      return;
-    }
+      const entity = this._hass.states[this._config.entity];
+      if (!entity) {
+        console.warn(`Reolink Card: Entity not found: ${this._config.entity}`);
+        this.renderError(`Entity not found: ${this._config.entity}`);
+        return;
+      }
 
-    const attributes = entity.attributes;
-    const entityName = entity.entity_id.split('.')[1].replace(/_/g, ' ');
-    const friendlyName = attributes.friendly_name || entityName;
-    const title = this._config.title || friendlyName;
+      const attributes = entity.attributes || {};
+      console.log(`Reolink Card: Rendering ${this._config.entity}`, { attributes });
+      
+      const entityName = entity.entity_id.split('.')[1].replace(/_/g, ' ');
+      const friendlyName = attributes.friendly_name || entityName;
+      const title = this._config.title || friendlyName;
     
     const showState = this._config.show_state !== false;
     
@@ -310,44 +318,65 @@ class ReolinkRecordingCard extends HTMLElement {
       // If card is already rendered, only update the image URL and state info
       this.updateImageSource(imageUrl, videoUrl, attributes, title, showState);
     }
+    } catch (error) {
+      console.error('Reolink Card: Render error that would cause "Configuration error":', error);
+      console.error('Reolink Card: Stack trace:', error.stack);
+      console.error('Reolink Card: Entity:', this._config?.entity);
+      console.error('Reolink Card: Config:', this._config);
+      
+      // Render a helpful error message instead of letting Home Assistant show "Configuration error"
+      this.renderError(`Render failed: ${error.message}. Check console for details.`);
+    }
   }
 
   updateImageSource(imageUrl, videoUrl, attributes, title, showState) {
-    // Only update if we have new image URL
-    if (!imageUrl) return;
-    
-    // Show loading spinner
-    this.isLoading = true;
-    const loadingSpinner = this.shadowRoot.querySelector('#loading-spinner');
-    if (loadingSpinner) loadingSpinner.style.display = 'flex';
-    
-    // Hide error message if previously shown
-    const errorMessage = this.shadowRoot.querySelector('#error-message');
-    if (errorMessage) errorMessage.style.display = 'none';
-    
-    // Update image source
-    const img = this.shadowRoot.querySelector('.reolink-image');
-    if (img) {
-      console.log(`Updating image source for ${title}`);
-      img.src = imageUrl;
-    }
-    
-    // Update state info if needed
-    if (showState) {
-      const titleEl = this.shadowRoot.querySelector('.bottom-left');
-      const timestampEl = this.shadowRoot.querySelector('.bottom-right');
-      
-      if (titleEl) titleEl.textContent = `${title}: ${attributes.event_type || 'Motion'}`;
-      if (timestampEl) timestampEl.textContent = attributes.timestamp || '';
-    }
-    
-    // Update video URL for tap action if available
-    if (videoUrl) {
-      const card = this.shadowRoot.querySelector('.image-container');
-      if (card) {
-        const oldHandler = card.onclick;
-        card.onclick = () => this.handleTap(videoUrl);
+    try {
+      // Only update if we have new image URL
+      if (!imageUrl) {
+        console.log('Reolink Card: No image URL provided for update');
+        return;
       }
+      
+      // Show loading spinner
+      this.isLoading = true;
+      const loadingSpinner = this.shadowRoot?.querySelector('#loading-spinner');
+      if (loadingSpinner) loadingSpinner.style.display = 'flex';
+      
+      // Hide error message if previously shown
+      const errorMessage = this.shadowRoot?.querySelector('#error-message');
+      if (errorMessage) errorMessage.style.display = 'none';
+      
+      // Update image source
+      const img = this.shadowRoot?.querySelector('.reolink-image');
+      if (img) {
+        console.log(`Reolink Card: Updating image source for ${title}`);
+        img.src = imageUrl;
+      } else {
+        console.warn('Reolink Card: Could not find image element to update');
+      }
+      
+      // Update state info if needed
+      if (showState && attributes) {
+        const titleEl = this.shadowRoot?.querySelector('.bottom-left');
+        const timestampEl = this.shadowRoot?.querySelector('.bottom-right');
+        
+        if (titleEl) titleEl.textContent = `${title}: ${attributes.event_type || 'Motion'}`;
+        if (timestampEl) timestampEl.textContent = attributes.timestamp || '';
+      }
+      
+      // Update video URL for tap action if available
+      if (videoUrl) {
+        const card = this.shadowRoot?.querySelector('.image-container');
+        if (card) {
+          const oldHandler = card.onclick;
+          card.onclick = () => this.handleTap(videoUrl);
+        }
+      }
+    } catch (error) {
+      console.error('Reolink Card: Error updating image source:', error);
+      console.error('Reolink Card: This could cause "Configuration error" in UI');
+      this.isLoading = false;
+      this.loadError = true;
     }
   }
 
