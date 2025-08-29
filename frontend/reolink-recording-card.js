@@ -1,6 +1,6 @@
 /**
  * Reolink Recording Card for Home Assistant
- * v1.1.1
+ * v1.1.2
  * A simple card to display Reolink camera recordings with auto-refresh
  */
 class ReolinkRecordingCard extends HTMLElement {
@@ -927,23 +927,65 @@ class ReolinkRecordingCardEditor extends HTMLElement {
   }
 }
 
-// Simple, reliable registration pattern (matches working cards like Sonos)
+// Defensive registration pattern for reliability on slower devices
 const CARD_VERSION = '1.1.0';
 const CARD_NAME = 'Reolink Recording Card';
 
-// Register card in customCards registry
-window.customCards = window.customCards || [];
-window.customCards.push({
-  type: 'reolink-recording-card',
-  name: CARD_NAME,
-  description: 'A card to display Reolink camera recordings with auto-refresh',
-  preview: true
+function registerReolinkCard() {
+  try {
+    // Defensive check - don't register if already registered
+    if (customElements.get('reolink-recording-card')) {
+      console.info(`%c REOLINK-RECORDING-CARD %c v${CARD_VERSION} already registered `, 
+        'color: orange; font-weight: bold; background: black', 
+        'color: white; font-weight: bold; background: dimgray');
+      return;
+    }
+
+    // Initialize customCards registry
+    window.customCards = window.customCards || [];
+    
+    // Check if already in registry to avoid duplicates
+    const existingCard = window.customCards.find(card => card.type === 'reolink-recording-card');
+    if (!existingCard) {
+      window.customCards.push({
+        type: 'reolink-recording-card',
+        name: CARD_NAME,
+        description: 'A card to display Reolink camera recordings with auto-refresh',
+        preview: true
+      });
+    }
+
+    // Register custom elements
+    customElements.define('reolink-recording-card', ReolinkRecordingCard);
+    customElements.define('reolink-recording-card-editor', ReolinkRecordingCardEditor);
+
+    console.info(`%c REOLINK-RECORDING-CARD %c v${CARD_VERSION} loaded `, 
+      'color: orange; font-weight: bold; background: black', 
+      'color: white; font-weight: bold; background: dimgray');
+      
+  } catch (error) {
+    console.error('Failed to register Reolink Recording Card:', error);
+    // Retry registration after a short delay for slower devices
+    setTimeout(() => {
+      console.warn('Retrying Reolink Recording Card registration...');
+      registerReolinkCard();
+    }, 1000);
+  }
+}
+
+// Multiple registration strategies for maximum compatibility
+if (document.readyState === 'loading') {
+  // DOM still loading - wait for DOMContentLoaded
+  document.addEventListener('DOMContentLoaded', registerReolinkCard);
+} else {
+  // DOM already loaded - register immediately
+  registerReolinkCard();
+}
+
+// Fallback registration on window load (for very slow devices)
+window.addEventListener('load', () => {
+  if (!customElements.get('reolink-recording-card')) {
+    console.warn('Reolink Recording Card not registered yet, trying fallback registration...');
+    registerReolinkCard();
+  }
 });
-
-// Register custom elements
-customElements.define('reolink-recording-card', ReolinkRecordingCard);
-customElements.define('reolink-recording-card-editor', ReolinkRecordingCardEditor);
-
-console.info(`%c REOLINK-RECORDING-CARD %c v${CARD_VERSION} loaded `, 
-  'color: orange; font-weight: bold; background: black', 
-  'color: white; font-weight: bold; background: dimgray');
