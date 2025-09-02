@@ -23,6 +23,12 @@ RESOLUTION_HIGH = "high"
 RESOLUTION_LOW = "low"
 DEFAULT_RESOLUTION_PREFERENCE = RESOLUTION_HIGH
 
+# Event-driven discovery options
+CONF_UPLOAD_DELAY = "upload_delay"
+DEFAULT_UPLOAD_DELAY = 30  # seconds to wait after motion ends before checking for new recordings
+CONF_ENABLE_EVENT_DRIVEN = "enable_event_driven"
+DEFAULT_ENABLE_EVENT_DRIVEN = True
+
 # Data keys
 DATA_COORDINATOR = "coordinator"
 
@@ -32,3 +38,6 @@ SERVICE_DOWNLOAD_RECORDING = "download_recording"
 
 # Events
 EVENT_RECORDING_UPDATED = "reolink_recordings_updated"
+
+# Motion sensor mapping
+CONF_MOTION_SENSOR_MAPPING = "motion_sensor_mapping"

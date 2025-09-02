@@ -31,6 +31,10 @@ from .const import (
     RESOLUTION_HIGH,
     RESOLUTION_LOW,
     EVENT_RECORDING_UPDATED,
+    CONF_UPLOAD_DELAY,
+    DEFAULT_UPLOAD_DELAY,
+    CONF_ENABLE_EVENT_DRIVEN,
+    DEFAULT_ENABLE_EVENT_DRIVEN,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -90,6 +94,17 @@ class ReolinkRecordingsCoordinator:
             self.enable_caching = entry.options[CONF_ENABLE_CACHING]
             _LOGGER.debug(f"Caching enabled: {self.enable_caching}")
         
+        # Get event-driven discovery preferences
+        self.enable_event_driven = DEFAULT_ENABLE_EVENT_DRIVEN
+        if entry and CONF_ENABLE_EVENT_DRIVEN in entry.options:
+            self.enable_event_driven = entry.options[CONF_ENABLE_EVENT_DRIVEN]
+            _LOGGER.debug(f"Event-driven discovery enabled: {self.enable_event_driven}")
+            
+        self.upload_delay = DEFAULT_UPLOAD_DELAY
+        if entry and CONF_UPLOAD_DELAY in entry.options:
+            self.upload_delay = entry.options[CONF_UPLOAD_DELAY]
+            _LOGGER.debug(f"Upload delay: {self.upload_delay} seconds")
+        
         self._ws_id = 1
         # Listeners that wish to be notified when new data is available
         self._listeners: list[callable] = []
@@ -104,6 +119,15 @@ class ReolinkRecordingsCoordinator:
         
         # Flag to track if we've loaded cached metadata
         self._metadata_loaded = False
+        
+        # Motion sensor to camera mapping - will be auto-discovered
+        self.motion_sensor_mapping = {}
+        
+        # Track pending motion-triggered discoveries
+        self._pending_discoveries = {}
+        
+        # Event listener unsubscribers
+        self._event_unsubscribers = []
 
     def _update_config_from_options(self):
         """Update configuration values from entry options."""
@@ -118,6 +142,23 @@ class ReolinkRecordingsCoordinator:
             self.snapshot_format = self.entry.options[CONF_SNAPSHOT_FORMAT]
             if old_format != self.snapshot_format:
                 _LOGGER.debug(f"Updated snapshot format: {self.snapshot_format}")
+        
+        if self.entry and CONF_ENABLE_EVENT_DRIVEN in self.entry.options:
+            old_value = self.enable_event_driven
+            self.enable_event_driven = self.entry.options[CONF_ENABLE_EVENT_DRIVEN]
+            if old_value != self.enable_event_driven:
+                _LOGGER.debug(f"Updated event-driven discovery: {self.enable_event_driven}")
+                # Re-setup event listeners if setting changed
+                if self.enable_event_driven:
+                    self._setup_motion_listeners()
+                else:
+                    self._cleanup_motion_listeners()
+        
+        if self.entry and CONF_UPLOAD_DELAY in self.entry.options:
+            old_delay = self.upload_delay
+            self.upload_delay = self.entry.options[CONF_UPLOAD_DELAY]
+            if old_delay != self.upload_delay:
+                _LOGGER.debug(f"Updated upload delay: {self.upload_delay} seconds")
     
     async def async_refresh(self, *_):
         """Refresh data from Reolink cameras."""
@@ -131,6 +172,11 @@ class ReolinkRecordingsCoordinator:
             if not self._metadata_loaded:
                 await self._load_cached_metadata()
                 self._metadata_loaded = True
+            
+            # Set up motion listeners if event-driven discovery is enabled and not already set up
+            if self.enable_event_driven and not self._event_unsubscribers:
+                await self._discover_motion_sensors()
+                self._setup_motion_listeners()
             
             _LOGGER.debug("Fetching latest Reolink recordings")
             
@@ -877,3 +923,212 @@ class ReolinkRecordingsCoordinator:
         
         self.hass.bus.async_fire(EVENT_RECORDING_UPDATED, event_data)
         _LOGGER.debug(f"Fired {EVENT_RECORDING_UPDATED} event for {camera_name}: {event_data}")
+    
+    async def _discover_motion_sensors(self):
+        """Load motion sensor mappings from configuration."""
+        if not self.enable_event_driven:
+            return
+            
+        _LOGGER.info("Loading motion sensor mappings from configuration")
+        
+        # Clear existing mapping
+        self.motion_sensor_mapping.clear()
+        
+        # Get configured mapping from options
+        from .const import CONF_MOTION_SENSOR_MAPPING
+        configured_mapping = self.entry.options.get(CONF_MOTION_SENSOR_MAPPING, {}) if self.entry else {}
+        
+        if not configured_mapping:
+            _LOGGER.warning("No motion sensor mappings configured. Event-driven discovery will be disabled.")
+            _LOGGER.info("Configure motion sensor mappings in the integration options to enable event-driven updates.")
+            return
+        
+        # Validate and load configured mappings
+        for sensor_entity_id, camera_mapping in configured_mapping.items():
+            # Parse camera mapping (format: "index: name")
+            try:
+                if ":" in camera_mapping:
+                    camera_index_str, camera_name = camera_mapping.split(":", 1)
+                    camera_index = int(camera_index_str.strip())
+                    camera_name = camera_name.strip()
+                    
+                    # Verify camera exists in our mapping
+                    if camera_index in self.camera_index_map:
+                        camera_slug = camera_name.lower().replace(" ", "_")
+                        self.motion_sensor_mapping[sensor_entity_id] = camera_slug
+                        _LOGGER.info(f"Mapped motion sensor {sensor_entity_id} to camera {camera_name} (index {camera_index})")
+                    else:
+                        _LOGGER.warning(f"Camera index {camera_index} not found in discovered cameras, skipping sensor {sensor_entity_id}")
+                else:
+                    _LOGGER.warning(f"Invalid camera mapping format for sensor {sensor_entity_id}: {camera_mapping}")
+            except (ValueError, IndexError) as e:
+                _LOGGER.warning(f"Error parsing camera mapping for sensor {sensor_entity_id}: {e}")
+        
+        if self.motion_sensor_mapping:
+            _LOGGER.info(f"Successfully loaded {len(self.motion_sensor_mapping)} motion sensor mappings from configuration")
+        else:
+            _LOGGER.warning("No valid motion sensor mappings found. Event-driven discovery will be disabled.")
+    
+    def _setup_motion_listeners(self):
+        """Set up event listeners for motion sensor state changes."""
+        if not self.enable_event_driven:
+            return
+            
+        # Clean up existing listeners first
+        self._cleanup_motion_listeners()
+        
+        _LOGGER.info("Setting up motion sensor event listeners for event-driven discovery")
+        
+        from homeassistant.helpers.event import async_track_state_change_event
+        
+        # Set up listeners for each motion sensor
+        for sensor_entity_id, camera_name in self.motion_sensor_mapping.items():
+            _LOGGER.debug(f"Setting up listener for {sensor_entity_id} -> {camera_name}")
+            
+            unsubscriber = async_track_state_change_event(
+                self.hass,
+                [sensor_entity_id],
+                self._handle_motion_state_change
+            )
+            self._event_unsubscribers.append(unsubscriber)
+        
+        _LOGGER.info(f"Set up {len(self._event_unsubscribers)} motion sensor listeners")
+    
+    def _cleanup_motion_listeners(self):
+        """Clean up motion sensor event listeners."""
+        _LOGGER.debug(f"Cleaning up {len(self._event_unsubscribers)} motion sensor listeners")
+        
+        for unsubscriber in self._event_unsubscribers:
+            try:
+                unsubscriber()
+            except Exception as e:
+                _LOGGER.warning(f"Error cleaning up motion listener: {e}")
+        
+        self._event_unsubscribers.clear()
+        
+        # Cancel any pending discoveries
+        for task in self._pending_discoveries.values():
+            if task and not task.done():
+                task.cancel()
+        self._pending_discoveries.clear()
+    
+    async def _handle_motion_state_change(self, event):
+        """Handle motion sensor state change events."""
+        entity_id = event.data.get("entity_id")
+        old_state = event.data.get("old_state")
+        new_state = event.data.get("new_state")
+        
+        if not entity_id or not old_state or not new_state:
+            return
+            
+        # We're interested in motion ending (on -> off)
+        if old_state.state == "on" and new_state.state == "off":
+            camera_name = self.motion_sensor_mapping.get(entity_id)
+            if camera_name:
+                _LOGGER.info(f"Motion ended for {camera_name} ({entity_id}), scheduling delayed discovery")
+                await self._schedule_motion_triggered_discovery(camera_name, entity_id)
+    
+    async def _schedule_motion_triggered_discovery(self, camera_name: str, sensor_entity_id: str):
+        """Schedule a delayed discovery for a specific camera after motion ends."""
+        # Cancel any existing pending discovery for this camera
+        if camera_name in self._pending_discoveries:
+            existing_task = self._pending_discoveries[camera_name]
+            if existing_task and not existing_task.done():
+                existing_task.cancel()
+                _LOGGER.debug(f"Cancelled existing pending discovery for {camera_name}")
+        
+        # Schedule new delayed discovery
+        task = asyncio.create_task(
+            self._delayed_motion_discovery(camera_name, sensor_entity_id)
+        )
+        self._pending_discoveries[camera_name] = task
+        
+        _LOGGER.debug(f"Scheduled discovery for {camera_name} in {self.upload_delay} seconds")
+    
+    async def _delayed_motion_discovery(self, camera_name: str, sensor_entity_id: str):
+        """Perform delayed discovery for a specific camera after motion ends."""
+        try:
+            # Wait for the upload delay
+            await asyncio.sleep(self.upload_delay)
+            
+            _LOGGER.info(f"Starting motion-triggered discovery for {camera_name} after {self.upload_delay}s delay")
+            
+            # Perform discovery for this specific camera
+            await self._discover_and_download_camera(camera_name)
+            
+            _LOGGER.info(f"Completed motion-triggered discovery for {camera_name}")
+            
+        except asyncio.CancelledError:
+            _LOGGER.debug(f"Motion-triggered discovery cancelled for {camera_name}")
+        except Exception as e:
+            _LOGGER.error(f"Error in motion-triggered discovery for {camera_name}: {e}")
+        finally:
+            # Clean up the pending task
+            if camera_name in self._pending_discoveries:
+                del self._pending_discoveries[camera_name]
+    
+    async def _discover_and_download_camera(self, target_camera_name: str):
+        """Discover and download recordings for a specific camera."""
+        try:
+            # Get bearer token for API access
+            token = await self._get_auth_token()
+            
+            # Find the camera index for the target camera
+            target_camera_index = None
+            for camera_index, camera_name in self.camera_index_map.items():
+                if camera_name.lower().replace(" ", "_") == target_camera_name.lower().replace(" ", "_"):
+                    target_camera_index = camera_index
+                    break
+            
+            if target_camera_index is None:
+                _LOGGER.warning(f"Could not find camera index for {target_camera_name}")
+                return
+            
+            _LOGGER.debug(f"Found camera index {target_camera_index} for {target_camera_name}")
+            
+            # Get the latest recording for this specific camera
+            camera_data = await self._get_latest_recording(target_camera_index, target_camera_name, token)
+            
+            if "error" in camera_data:
+                _LOGGER.warning(f"Error getting recording for {target_camera_name}: {camera_data['error']}")
+                return
+            
+            # Download the recording
+            await self._download_recordings([camera_data])
+            
+            # Update the data with this camera's info
+            if "cameras" not in self.data:
+                self.data["cameras"] = []
+            
+            # Update or add this camera's data
+            updated = False
+            for i, existing_camera in enumerate(self.data["cameras"]):
+                if existing_camera.get("camera") == target_camera_name:
+                    self.data["cameras"][i] = camera_data
+                    updated = True
+                    break
+            
+            if not updated:
+                self.data["cameras"].append(camera_data)
+            
+            self.data["last_update"] = dt_util.utcnow().isoformat()
+            
+            # Save metadata
+            await self._save_metadata()
+            
+            # Notify listeners
+            for update_cb in list(self._listeners):
+                try:
+                    update_cb()
+                except Exception as err:
+                    _LOGGER.debug("Listener update failed: %s", err)
+            
+            _LOGGER.info(f"Motion-triggered discovery completed for {target_camera_name}")
+            
+        except Exception as e:
+            _LOGGER.error(f"Error in camera-specific discovery for {target_camera_name}: {e}")
+    
+    async def cleanup(self):
+        """Clean up resources when the coordinator is being destroyed."""
+        _LOGGER.debug("Cleaning up Reolink Recordings coordinator")
+        self._cleanup_motion_listeners()

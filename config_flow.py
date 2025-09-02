@@ -31,6 +31,11 @@ from .const import (
     DEFAULT_RESOLUTION_PREFERENCE,
     RESOLUTION_HIGH,
     RESOLUTION_LOW,
+    CONF_UPLOAD_DELAY,
+    DEFAULT_UPLOAD_DELAY,
+    CONF_ENABLE_EVENT_DRIVEN,
+    DEFAULT_ENABLE_EVENT_DRIVEN,
+    CONF_MOTION_SENSOR_MAPPING,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -95,6 +100,8 @@ class ReolinkRecordingsOptionsFlow(config_entries.OptionsFlow):
         """Initialize options flow."""
         # Store config_entry as self._config_entry which is the Home Assistant recommended pattern
         self._config_entry = config_entry
+        self._motion_sensors = []
+        self._cameras = []
         super().__init__()
 
     async def async_step_init(
@@ -102,7 +109,14 @@ class ReolinkRecordingsOptionsFlow(config_entries.OptionsFlow):
     ) -> FlowResult:
         """Handle options flow."""
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            # Check if user wants to configure motion sensor mapping
+            if user_input.get(CONF_ENABLE_EVENT_DRIVEN, False):
+                # Store the basic options and proceed to motion sensor mapping
+                self._basic_options = user_input
+                return await self.async_step_motion_sensors()
+            else:
+                # Event-driven disabled, save options without mapping
+                return self.async_create_entry(title="", data=user_input)
 
         current_options = self._config_entry.options
         
@@ -144,7 +158,100 @@ class ReolinkRecordingsOptionsFlow(config_entries.OptionsFlow):
                 RESOLUTION_HIGH,
                 RESOLUTION_LOW
             ]),
+            vol.Optional(
+                CONF_ENABLE_EVENT_DRIVEN,
+                default=current_options.get(
+                    CONF_ENABLE_EVENT_DRIVEN, DEFAULT_ENABLE_EVENT_DRIVEN
+                ),
+            ): bool,
+            vol.Optional(
+                CONF_UPLOAD_DELAY,
+                default=current_options.get(
+                    CONF_UPLOAD_DELAY, DEFAULT_UPLOAD_DELAY
+                ),
+            ): vol.All(vol.Coerce(int), vol.Range(min=5, max=300)),
             # Media player option removed - always using direct API
         }
 
-        return self.async_show_form(step_id="init", data_schema=vol.Schema(options))
+        return self.async_show_form(
+            step_id="init", 
+            data_schema=vol.Schema(options),
+            description_placeholders={
+                "motion_sensor_info": "If event-driven discovery is enabled, you'll be able to configure motion sensor mappings on the next step."
+            }
+        )
+
+    async def async_step_motion_sensors(
+        self, user_input: Optional[Dict[str, Any]] = None
+    ) -> FlowResult:
+        """Handle motion sensor mapping configuration."""
+        if user_input is not None:
+            # Combine basic options with motion sensor mapping
+            final_options = {**self._basic_options}
+            
+            # Build motion sensor mapping from user input
+            motion_mapping = {}
+            for key, value in user_input.items():
+                if key.startswith("sensor_") and value != "none":
+                    sensor_id = key.replace("sensor_", "")
+                    motion_mapping[sensor_id] = value
+            
+            if motion_mapping:
+                final_options[CONF_MOTION_SENSOR_MAPPING] = motion_mapping
+            
+            return self.async_create_entry(title="", data=final_options)
+        
+        # Get available motion sensors and cameras
+        await self._get_available_entities()
+        
+        if not self._motion_sensors:
+            # No motion sensors found, skip mapping
+            return self.async_create_entry(title="", data=self._basic_options)
+        
+        # Build schema for motion sensor mapping
+        current_mapping = self._config_entry.options.get(CONF_MOTION_SENSOR_MAPPING, {})
+        schema_dict = {}
+        
+        camera_options = ["none"] + [f"{idx}: {name}" for idx, name in self._cameras]
+        
+        for sensor in self._motion_sensors:
+            # Find current mapping for this sensor
+            current_camera = "none"
+            for mapped_sensor, mapped_camera in current_mapping.items():
+                if mapped_sensor == sensor:
+                    # Find the camera index for this camera name
+                    for idx, name in self._cameras:
+                        if name.lower().replace(" ", "_") == mapped_camera:
+                            current_camera = f"{idx}: {name}"
+                            break
+                    break
+            
+            schema_dict[vol.Optional(f"sensor_{sensor}", default=current_camera)] = vol.In(camera_options)
+        
+        return self.async_show_form(
+            step_id="motion_sensors",
+            data_schema=vol.Schema(schema_dict),
+            description_placeholders={
+                "info": "Map motion sensors to cameras for event-driven recording updates. Select 'none' to disable mapping for a sensor."
+            }
+        )
+    
+    async def _get_available_entities(self):
+        """Get available motion sensors and cameras."""
+        # Get motion sensors
+        states = self.hass.states.async_all()
+        self._motion_sensors = []
+        
+        for state in states:
+            if (state.entity_id.startswith("binary_sensor.") and 
+                (state.attributes.get("device_class") == "motion" or "motion" in state.entity_id.lower())):
+                self._motion_sensors.append(state.entity_id)
+        
+        # Get cameras from coordinator if available
+        self._cameras = []
+        coordinator_data = self.hass.data.get(DOMAIN, {}).get(self._config_entry.entry_id, {}).get("coordinator")
+        if coordinator_data and hasattr(coordinator_data, 'camera_index_map'):
+            self._cameras = list(coordinator_data.camera_index_map.items())
+        else:
+            # Fallback: use some default camera names
+            self._cameras = [(0, "Camera 1"), (1, "Camera 2"), (2, "Camera 3"), (3, "Camera 4")]
