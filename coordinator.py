@@ -30,6 +30,7 @@ from .const import (
     DEFAULT_RESOLUTION_PREFERENCE,
     RESOLUTION_HIGH,
     RESOLUTION_LOW,
+    EVENT_RECORDING_UPDATED,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -446,6 +447,8 @@ class ReolinkRecordingsCoordinator:
                         _LOGGER.debug(f"Using existing JPG snapshot for {camera_name} at {jpg_path}")
                         self.jpg_snapshot_paths[camera_name] = str(jpg_path)
                         self.jpg_snapshot_paths[consistent_camera_name] = str(jpg_path)
+                    
+                    # Skip firing event for cached recordings - only fire for new downloads
                             
                     continue
                 else:
@@ -527,6 +530,17 @@ class ReolinkRecordingsCoordinator:
                     _LOGGER.warning(f"Could not generate snapshot(s) for {camera_name}: {snap_err}")
 
                 _LOGGER.info(f"Downloaded recording for {camera_name} to {dest_path}")
+                
+                # Fire event for device triggers
+                self._fire_recording_event(
+                    camera_name=consistent_camera_name,
+                    event_type=camera_data.get("event_type", "unknown"),
+                    date=camera_data.get("date"),
+                    timestamp=camera_data.get("timestamp"),
+                    duration=camera_data.get("duration"),
+                    recording_id=recording_id,
+                    file_path=str(dest_path)
+                )
                 
             except asyncio.CancelledError:
                 _LOGGER.warning(f"Download cancelled for {camera_name} - this can happen during Home Assistant shutdown or network timeouts")
@@ -836,3 +850,30 @@ class ReolinkRecordingsCoordinator:
         await self.async_refresh()
     
     # _get_available_media_player method removed - always using direct Media Source API
+    
+    def _fire_recording_event(
+        self,
+        camera_name: str,
+        event_type: str,
+        date: str = None,
+        timestamp: str = None,
+        duration: str = None,
+        recording_id: str = None,
+        file_path: str = None,
+    ):
+        """Fire an event when a recording is updated."""
+        event_data = {
+            "camera": camera_name,
+            "event_type": event_type,
+            "date": date,
+            "timestamp": timestamp,
+            "duration": duration,
+            "recording_id": recording_id,
+            "file_path": file_path,
+        }
+        
+        # Remove None values
+        event_data = {k: v for k, v in event_data.items() if v is not None}
+        
+        self.hass.bus.async_fire(EVENT_RECORDING_UPDATED, event_data)
+        _LOGGER.debug(f"Fired {EVENT_RECORDING_UPDATED} event for {camera_name}: {event_data}")

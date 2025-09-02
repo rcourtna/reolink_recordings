@@ -1,0 +1,10 @@
+{
+  "device_automation": {
+    "trigger_type": {
+      "recording_updated": "New recording available",
+      "vehicle_detected": "Vehicle detected in recording",
+      "person_detected": "Person detected in recording", 
+      "motion_detected": "Motion detected in recording"
+    }
+  }
+}
