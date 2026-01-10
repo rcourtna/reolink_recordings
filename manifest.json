@@ -2,10 +2,14 @@
   "domain": "reolink_recordings",
   "name": "Reolink Recordings",
   "documentation": "https://github.com/rcourtna/reolink_recordings",
-  "dependencies": ["reolink"],
-  "codeowners": ["@rcourtna"],
+  "dependencies": [
+    "reolink"
+  ],
+  "codeowners": [
+    "@rcourtna"
+  ],
   "config_flow": true,
   "iot_class": "local_polling",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "requirements": []
 }

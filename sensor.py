@@ -93,14 +93,19 @@ class ReolinkRecordingSensor(CoordinatorEntity, SensorEntity):
     @property
     def available(self) -> bool:
         """Always available if we have a path for the latest recording."""
-        return self.camera_name in self.coordinator.recording_paths
+        if self.camera_name in self.coordinator.recording_paths:
+            return True
+        # Case-insensitive fallback
+        return any(k.lower() == self.camera_name.lower() for k in self.coordinator.recording_paths)
     
     @property
     def state(self) -> Optional[str]:
         """Return the state of the sensor."""
         # Find this camera's data
         for camera_data in self.coordinator.data.get("cameras", []):
-            if camera_data["camera"] == self.camera_name:
+            # Check for name match (case-insensitive)
+            if camera_data["camera"] == self.camera_name or \
+               camera_data["camera"].lower() == self.camera_name.lower():
                 if "error" in camera_data:
                     return None
                     
@@ -121,7 +126,9 @@ class ReolinkRecordingSensor(CoordinatorEntity, SensorEntity):
         
         # Find this camera's data and recording path
         for camera_data in self.coordinator.data.get("cameras", []):
-            if camera_data["camera"] == self.camera_name:
+            # Check for name match (case-insensitive)
+            if camera_data["camera"] == self.camera_name or \
+               camera_data["camera"].lower() == self.camera_name.lower():
                 if "error" not in camera_data:
                     attributes["date"] = camera_data.get("date")
                     attributes["timestamp"] = camera_data.get("timestamp")
@@ -129,18 +136,36 @@ class ReolinkRecordingSensor(CoordinatorEntity, SensorEntity):
                     attributes["event_type"] = camera_data.get("event_type")
                     attributes["last_updated"] = now.isoformat()
                     
-                    # Get the file path
+                    # Get the file path - try exact match first, then case-insensitive
                     recording_path = self.coordinator.recording_paths.get(self.camera_name)
+                    if not recording_path:
+                        for k, v in self.coordinator.recording_paths.items():
+                            if k.lower() == self.camera_name.lower():
+                                recording_path = v
+                                break
+                    
                     if recording_path:
                         attributes["file_path"] = recording_path
                         attributes["file_name"] = self._video_filename
-
+                        
                         # Media URL (MP4) for tap-to-play - using /local/ URL via symlink
                         attributes["media_url"] = f"/local/reolink_recordings/recordings/{self._video_filename}?t={timestamp}"
 
                         # Select the appropriate snapshot image based on configuration
+                        # Lookup paths with case-insensitive fallback
                         gif_path = getattr(self.coordinator, "snapshot_paths", {}).get(self.camera_name)
+                        if not gif_path:
+                            for k, v in getattr(self.coordinator, "snapshot_paths", {}).items():
+                                if k.lower() == self.camera_name.lower():
+                                    gif_path = v
+                                    break
+
                         jpg_path = getattr(self.coordinator, "jpg_snapshot_paths", {}).get(self.camera_name)
+                        if not jpg_path:
+                            for k, v in getattr(self.coordinator, "jpg_snapshot_paths", {}).items():
+                                if k.lower() == self.camera_name.lower():
+                                    jpg_path = v
+                                    break
                         
                         # Choose which snapshot to use for entity_picture
                         if self._snapshot_format == SNAPSHOT_FORMAT_GIF and gif_path:

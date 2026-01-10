@@ -181,15 +181,23 @@ class ReolinkRecordingsCoordinator:
             _LOGGER.debug("Fetching latest Reolink recordings")
             
             # Discover cameras and their latest recordings
-            cameras_data = await self._discover_cameras()
+            new_cameras_data = await self._discover_cameras()
             
-            # Download the recordings
-            await self._download_recordings(cameras_data)
+            # Merge new data with cached data
+            # This ensures that if a camera is offline (error), we keep its old data
+            merged_cameras_data = self._merge_camera_data(self.data.get("cameras", []), new_cameras_data)
+            
+            # Download the recordings (only for successful new items)
+            await self._download_recordings(merged_cameras_data)
+            
+            # Scan for existing files on disk that might be missing from metadata
+            # This handles cases where we have files but no metadata (e.g. after fresh install)
+            await self._scan_existing_files(merged_cameras_data)
             
             # Update the data
             self.data = {
                 "last_update": dt_util.utcnow().isoformat(),
-                "cameras": cameras_data
+                "cameras": merged_cameras_data
             }
             
             # TEMPORARY DEBUG: Log detailed data structure for debugging sensor issues
@@ -209,12 +217,113 @@ class ReolinkRecordingsCoordinator:
                 except Exception as err:
                     _LOGGER.debug("Listener update failed: %s", err)
             
-            _LOGGER.info(f"Refreshed data for {len(cameras_data)} Reolink cameras")
+            _LOGGER.info(f"Refreshed data for {len(merged_cameras_data)} Reolink cameras")
             return True
         
         except Exception as ex:
             _LOGGER.error(f"Error refreshing Reolink recordings: {ex}")
             return False
+
+    def _merge_camera_data(self, cached_data: List[Dict[str, Any]], new_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Merge new camera data with cached data, preserving valid cached entries if new one errors."""
+        merged = []
+        new_map = {c.get("camera"): c for c in new_data}
+        cached_map = {c.get("camera"): c for c in cached_data}
+        
+        # Get all unique camera names
+        all_cameras = set(list(new_map.keys()) + list(cached_map.keys()))
+        
+        for camera in all_cameras:
+            new_item = new_map.get(camera)
+            cached_item = cached_map.get(camera)
+            
+            if new_item and "error" not in new_item:
+                # Valid new data - use it
+                merged.append(new_item)
+            elif cached_item and "error" not in cached_item:
+                # New data missing or error, but we have valid cache - use cache
+                if new_item:
+                    _LOGGER.warning(f"Camera {camera} is offline/error ({new_item.get('error')}). Using cached data.")
+                else:
+                    _LOGGER.info(f"Camera {camera} not found in current scan. Using cached data.")
+                merged.append(cached_item)
+                
+                # Ensure paths are populated for this cached item
+                self._ensure_paths_for_camera(cached_item)
+            elif new_item:
+                 # Only have errored new data
+                 merged.append(new_item)
+        
+        return merged
+
+    def _ensure_paths_for_camera(self, camera_data: Dict[str, Any]):
+        """Ensure recording_paths are populated for a camera data item."""
+        camera_name = camera_data.get("camera")
+        if not camera_name:
+            return
+            
+        # We need to reconstruct the paths based on naming convention
+        # This duplicates logic from _download_recordings but is necessary for cache restoration
+        # Try both original name and index-mapped name
+        names_to_try = [camera_name]
+        if "camera_index" in camera_data and camera_data["camera_index"] in self.camera_index_map:
+            names_to_try.append(self.camera_index_map[camera_data["camera_index"]])
+            
+        for name in names_to_try:
+            slug = name.lower().replace(" ", "_")
+            video_path = self.recordings_dir / f"{slug}_latest.mp4"
+            gif_path = self.recordings_dir / f"{slug}_latest.gif"
+            jpg_path = self.recordings_dir / f"{slug}_latest.jpg"
+            
+            if video_path.exists():
+                self.recording_paths[name] = str(video_path)
+            if gif_path.exists():
+                self.snapshot_paths[name] = str(gif_path)
+            if jpg_path.exists():
+                self.jpg_snapshot_paths[name] = str(jpg_path)
+
+    async def _scan_existing_files(self, cameras_data: List[Dict[str, Any]]):
+        """Scan directory for existing files that might be missing from metadata."""
+        # Get list of known cameras in current data
+        known_cameras_lower = {c.get("camera", "").lower(): c for c in cameras_data}
+        
+        # Scan recordings directory
+        try:
+            for file_path in self.recordings_dir.glob("*_latest.mp4"):
+                # Parse filename: "front_door_latest.mp4" -> "front door"
+                filename = file_path.name
+                name_part = filename.replace("_latest.mp4", "").replace("_", " ")
+                
+                # Check if this camera is already known
+                # We do a loose check because "front door" vs "Front Door"
+                is_known = False
+                for known_name in known_cameras_lower:
+                    if known_name.replace(" ", "_") == name_part.replace(" ", "_"):
+                        is_known = True
+                        break
+                
+                if not is_known:
+                    _LOGGER.info(f"Found orphaned recording file for '{name_part}', restoring to sensor data")
+                    
+                    # Create a minimal data entry
+                    stat = file_path.stat()
+                    mod_time = datetime.fromtimestamp(stat.st_mtime)
+                    
+                    restored_data = {
+                        "camera": name_part.title(), # Best guess formatting
+                        "timestamp": mod_time.strftime("%H:%M:%S"),
+                        "date": mod_time.strftime("%Y/%m/%d"),
+                        "event_type": "Restored file",
+                        "duration": "Unknown",
+                        "recording_id": f"restored_{int(stat.st_mtime)}",
+                        "restored": True
+                    }
+                    
+                    cameras_data.append(restored_data)
+                    self._ensure_paths_for_camera(restored_data)
+                    
+        except Exception as e:
+            _LOGGER.error(f"Error scanning existing files: {e}")
 
     async def _discover_cameras(self) -> List[Dict[str, Any]]:
         """Discover all Reolink cameras and their latest recordings."""
@@ -813,8 +922,11 @@ class ReolinkRecordingsCoordinator:
         
         metadata = {
             "last_update": self.data.get("last_update"),
+            "data": self.data, # Save the entire data structure including cameras list
             "recordings": self.recording_paths,
-            "recording_cache": self.recording_cache,  # Save cache for persistence between restarts
+            "recording_cache": self.recording_cache,
+            "camera_index_map": self.camera_index_map, # Also persist the mapping
+            "camera_nvr_map": self.camera_nvr_map
         }
         
         try:
@@ -848,25 +960,40 @@ class ReolinkRecordingsCoordinator:
                 # Restore recording cache if available
                 if "recording_cache" in metadata:
                     self.recording_cache = metadata["recording_cache"]
-                    _LOGGER.debug(f"Loaded recording cache with {len(self.recording_cache)} entries")
-                    
+                
+                # Restore full data structure
+                if "data" in metadata:
+                    self.data = metadata["data"]
+                    _LOGGER.debug(f"Loaded cached data for {len(self.data.get('cameras', []))} cameras")
+                
+                # Restore maps
+                if "camera_index_map" in metadata:
+                    # JSON keys are always strings, convert back to int
+                    self.camera_index_map = {int(k): v for k, v in metadata["camera_index_map"].items()}
+                if "camera_nvr_map" in metadata:
+                    self.camera_nvr_map = {int(k): v for k, v in metadata["camera_nvr_map"].items()}
+
                 # Restore recording paths if available
                 if "recordings" in metadata:
                     self.recording_paths = metadata["recordings"]
-                    _LOGGER.debug(f"Loaded recording paths with {len(self.recording_paths)} entries")
+                    
+                _LOGGER.info("Successfully loaded cached metadata and state")
+                    
             except ImportError:
                 # Fallback to sync operations if aiofiles not available
                 try:
                     with open(metadata_file, "r") as f:
                         metadata = json.load(f)
                     
+                    if "data" in metadata:
+                        self.data = metadata["data"]
+                    
                     if "recording_cache" in metadata:
                         self.recording_cache = metadata["recording_cache"]
-                        _LOGGER.debug(f"Loaded recording cache with {len(self.recording_cache)} entries")
                         
                     if "recordings" in metadata:
                         self.recording_paths = metadata["recordings"]
-                        _LOGGER.debug(f"Loaded recording paths with {len(self.recording_paths)} entries")
+                        
                 except Exception as e:
                     _LOGGER.warning(f"Error loading cached metadata: {e}")
             except Exception as e:
