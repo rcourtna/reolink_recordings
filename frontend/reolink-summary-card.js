@@ -307,6 +307,36 @@ class ReolinkSummaryCard extends HTMLElement {
             width: 18px;
             height: 18px;
           }
+          .live-btn {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            background: rgba(0, 0, 0, 0.6);
+            color: #ddd;
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            z-index: 10;
+            backdrop-filter: blur(2px);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            border: 1px solid rgba(255,255,255,0.2);
+            transition: all 0.2s ease;
+          }
+          .live-btn:hover {
+            background: rgba(30, 30, 30, 0.9);
+            color: white;
+            border-color: rgba(255,255,255,0.5);
+            transform: scale(1.05);
+          }
+          .live-icon svg {
+            width: 14px;
+            height: 14px;
+            fill: currentColor;
+          }
           .relative-time {
              position: absolute;
              top: 8px;
@@ -350,6 +380,35 @@ class ReolinkSummaryCard extends HTMLElement {
     if (interval > 1) return Math.floor(interval) + " mins ago";
     return Math.floor(seconds > 0 ? seconds : 0) + " secs ago";
   }
+  
+  _findLiveCamera(cameraName) {
+    if (!this._hass || !this._hass.states || !cameraName) return null;
+    const target = cameraName.toLowerCase();
+    
+    const cameras = Object.keys(this._hass.states).filter(c => c.startsWith('camera.'));
+    
+    // Find cameras that have a matching friendly name or entity ID
+    const matches = cameras.filter(entityId => {
+      const attrs = this._hass.states[entityId].attributes || {};
+      const friendlyObj = (attrs.friendly_name || entityId).toLowerCase();
+      return friendlyObj.includes(target) || entityId.includes(target.replace(/ /g, '_'));
+    });
+    
+    // Prefer higher quality stream
+    const clear = matches.find(c => {
+         const attrs = this._hass.states[c].attributes || {};
+         return (attrs.friendly_name || c).toLowerCase().includes('clear') || c.includes('clear') || c.includes('main');
+    });
+    if (clear) return clear;
+    
+    const fluency = matches.find(c => {
+         const attrs = this._hass.states[c].attributes || {};
+         return (attrs.friendly_name || c).toLowerCase().includes('fluent') || c.includes('fluent') || c.includes('sub');
+    });
+    if (fluency) return fluency;
+    
+    return matches.length > 0 ? matches[0] : null;
+  }
 
   _updateContent(recordings) {
     const container = this.shadowRoot.getElementById('recordings-container');
@@ -366,20 +425,38 @@ class ReolinkSummaryCard extends HTMLElement {
       const timestamp = rec.attributes.timestamp || '';
       const timeAgo = this._timeSince(rec.dateObj);
       
+      // Look up live camera using the clean camera name (e.g. "Pole Barn")
+      let cleanName = rec.name.replace(/latest recording/i, '').replace(/_latest_recording/i, '').trim();
+      if (!cleanName) cleanName = rec.entityId.replace('sensor.', '').replace('_latest_recording', '');
+      
+      const cameraEntity = this._findLiveCamera(cleanName);
+      
       clickHandlers.push({
         id: `rec-${index}`,
+        liveId: `live-${index}`,
+        index: index,
         url: videoUrl,
-        entity: rec.entityId
+        entity: rec.entityId,
+        title: cleanName,
+        timestamp: timestamp,
+        cameraEntity: cameraEntity
       });
 
       const elementClass = isHero ? 'hero-item' : 'secondary-item';
       
+      const liveBtnHtml = cameraEntity ? `
+        <div class="live-btn" id="live-` + index + `" title="View Live Camera">
+          <div class="live-icon"><svg viewBox="0 0 24 24"><path d="M17,10.5V7A1,1 0 0,0 16,6H4A1,1 0 0,0 3,7V17A1,1 0 0,0 4,18H16A1,1 0 0,0 17,17V13.5L21,17.5V6.5L17,10.5Z"/></svg></div>
+          <span>Live View</span>
+        </div>` : '';
+      
       const itemHtml = `
         <div class="` + elementClass + `" id="rec-` + index + `">
+          ` + liveBtnHtml + `
           <div class="relative-time">` + timeAgo + `</div>
-          ` + (imageUrl ? '<img src="' + imageUrl + '" alt="' + rec.name + '" loading="lazy"/>' : '<div style="height:100%; display:flex; align-items:center; justify-content:center; color:#ccc;">No Image</div>') + `
+          ` + (imageUrl ? '<img src="' + imageUrl + '" alt="' + cleanName + '" loading="lazy"/>' : '<div style="height:100%; display:flex; align-items:center; justify-content:center; color:#ccc;">No Image</div>') + `
           <div class="overlay-bottom">
-            <div class="cam-name">` + rec.name + `</div>
+            <div class="cam-name">` + cleanName + `</div>
             <div class="event-meta">
               <span>` + eventType + `</span>
               <span>` + timestamp + `</span>
@@ -412,28 +489,85 @@ class ReolinkSummaryCard extends HTMLElement {
       const el = this.shadowRoot.getElementById(handler.id);
       if (el && handler.url) {
         el.addEventListener('click', () => {
-          this._handleTap(handler.url, handler.entity);
+          this._openModal(handler.url, handler.title, handler.timestamp);
+        });
+      }
+      
+      const liveEl = this.shadowRoot.getElementById(handler.liveId);
+      if (liveEl && handler.cameraEntity) {
+        liveEl.addEventListener('click', (e) => {
+          e.stopPropagation(); // prevent modal from opening
+          const event = new CustomEvent('hass-more-info', {
+            detail: { entityId: handler.cameraEntity }, bubbles: true, composed: true
+          });
+          this.dispatchEvent(event);
         });
       }
     });
   }
 
-  _handleTap(url, entityId) {
+  _openModal(url, title, timestamp) {
     if (!url) return;
-    const action = this._config.tap_action || { action: 'url' };
-    switch (action.action) {
-      case 'url':
-        window.open(url, '_blank');
-        break;
-      case 'more-info':
-        const event = new CustomEvent('hass-more-info', {
-          detail: { entityId: entityId }, bubbles: true, composed: true
-        });
-        this.dispatchEvent(event);
-        break;
-      default:
-        window.open(url, '_blank');
-    }
+    
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = 'position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.85); z-index: 999999; display: flex; flex-direction: column; justify-content: center; align-items: center; font-family: var(--paper-font-common-base_-_font-family, sans-serif); opacity: 0; transition: opacity 0.3s ease;';
+    
+    wrapper.onclick = (e) => {
+      if (e.target === wrapper) this._closeModal(wrapper);
+    };
+    
+    // Close button
+    const closeBtn = document.createElement('div');
+    closeBtn.textContent = '✕';
+    closeBtn.style.cssText = 'position: absolute; top: 20px; right: 20px; color: white; font-size: 28px; cursor: pointer; background: rgba(255,255,255,0.2); width: 48px; height: 48px; border-radius: 50%; text-align: center; line-height: 48px; z-index: 2;';
+    closeBtn.onmouseover = () => closeBtn.style.background = 'rgba(255,255,255,0.4)';
+    closeBtn.onmouseout = () => closeBtn.style.background = 'rgba(255,255,255,0.2)';
+    closeBtn.onclick = () => this._closeModal(wrapper);
+    
+    // Container
+    const container = document.createElement('div');
+    container.style.cssText = 'width: 90%; max-width: 1000px; background: black; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,0.6); z-index: 1; transform: scale(0.95); transition: transform 0.3s ease;';
+    
+    // Header
+    const header = document.createElement('div');
+    header.style.cssText = 'color: white; padding: 16px 20px; font-size: 1.2rem; background: #1a1a1a; display: flex; justify-content: space-between; border-bottom: 1px solid #333;';
+    header.innerHTML = '<span>' + title + '</span><span style="color: #aaa; font-size: 1rem;">' + timestamp + '</span>';
+    
+    // Video
+    const video = document.createElement('video');
+    video.controls = true;
+    video.autoplay = true;
+    video.playsInline = true;
+    video.style.cssText = 'width: 100%; display: block; max-height: calc(100vh - 120px); object-fit: contain; background: black; outline: none;';
+    
+    const source = document.createElement('source');
+    source.src = url;
+    source.type = 'video/mp4';
+    
+    video.appendChild(source);
+    container.appendChild(header);
+    container.appendChild(video);
+    wrapper.appendChild(closeBtn);
+    wrapper.appendChild(container);
+    
+    document.body.appendChild(wrapper);
+    
+    // Animate in
+    requestAnimationFrame(() => {
+      wrapper.style.opacity = '1';
+      container.style.transform = 'scale(1)';
+    });
+  }
+
+  _closeModal(wrapper) {
+    if (!wrapper || !wrapper.parentNode) return;
+    wrapper.style.opacity = '0';
+    wrapper.children[1].style.transform = 'scale(0.95)';
+    setTimeout(() => {
+      if (wrapper.parentNode) {
+        document.body.removeChild(wrapper);
+      }
+    }, 300);
   }
 
   setupAutoRefresh() {
