@@ -313,7 +313,7 @@ class ReolinkSummaryCard extends HTMLElement {
             left: 8px;
             background: rgba(0, 0, 0, 0.6);
             color: #ddd;
-            padding: 6px 10px;
+            padding: 6px 12px;
             border-radius: 4px;
             font-size: 0.8rem;
             font-weight: 500;
@@ -326,11 +326,25 @@ class ReolinkSummaryCard extends HTMLElement {
             border: 1px solid rgba(255,255,255,0.2);
             transition: all 0.2s ease;
           }
+          .secondary-item .live-btn {
+            top: 6px;
+            left: 6px;
+            padding: 4px 6px;
+            border-radius: 4px;
+            border: none;
+            background: rgba(0, 0, 0, 0.45);
+          }
+          .secondary-item .live-btn span {
+            display: none; /* Hide the text "Live View" on small cards to save space */
+          }
           .live-btn:hover {
             background: rgba(30, 30, 30, 0.9);
             color: white;
             border-color: rgba(255,255,255,0.5);
             transform: scale(1.05);
+          }
+          .secondary-item .live-btn:hover {
+            background: rgba(0, 0, 0, 0.8);
           }
           .live-icon svg {
             width: 14px;
@@ -349,7 +363,28 @@ class ReolinkSummaryCard extends HTMLElement {
              z-index: 5;
              backdrop-filter: blur(2px);
           }
+          .secondary-item .relative-time {
+             top: 6px;
+             right: 6px;
+             font-size: 0.65rem;
+             padding: 3px 6px;
+             background: rgba(0, 0, 0, 0.45);
+          }
+          .secondary-item .overlay-bottom {
+             padding: 8px;
+          }
+          .secondary-item .cam-name {
+             font-size: 0.9em;
+             white-space: nowrap;
+             overflow: hidden;
+             text-overflow: ellipsis;
+             margin-bottom: 0px;
+          }
+          .secondary-item .event-meta {
+             font-size: 0.75em;
+          }
         </style>
+
 
         <ha-card>
           ` + (this._config.title ? '<div class="title">' + this._config.title + '</div>' : '') + `
@@ -428,6 +463,18 @@ class ReolinkSummaryCard extends HTMLElement {
       // Look up live camera using the clean camera name (e.g. "Pole Barn")
       let cleanName = rec.name.replace(/latest recording/i, '').replace(/_latest_recording/i, '').trim();
       if (!cleanName) cleanName = rec.entityId.replace('sensor.', '').replace('_latest_recording', '');
+      
+      // Make it beautiful for display (e.g., "first_landing" -> "First Landing")
+      if (cleanName.includes('_')) {
+        cleanName = cleanName.split('_')
+          .filter(Boolean)
+          .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+          .join(' ');
+      }
+      // Also capitalize first letter if purely lowercase
+      else if (cleanName === cleanName.toLowerCase()) {
+        cleanName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
+      }
       
       const cameraEntity = this._findLiveCamera(cleanName);
       
