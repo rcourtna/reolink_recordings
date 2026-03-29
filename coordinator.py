@@ -628,7 +628,13 @@ class ReolinkRecordingsCoordinator:
             _LOGGER.info(f"Downloading recording for camera '{consistent_camera_name}' (index: {camera_data.get('camera_index', 'unknown')}) to {filename}")
             
             # Get the media content ID
-            media_id = camera_data["media_content_id"]
+            media_id = camera_data.get("media_content_id")
+            if not media_id:
+                if camera_data.get("restored"):
+                    _LOGGER.debug(f"Skipping download for restored camera '{consistent_camera_name}' (no media id)")
+                    continue
+                _LOGGER.warning(f"No media_content_id found for '{consistent_camera_name}'")
+                continue
             
             try:
                 # Try direct proxy method first

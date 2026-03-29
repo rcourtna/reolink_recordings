@@ -139,13 +139,28 @@ tap_action:
   action: url
 ```
 
+#### Method 5: Using the Reolink Summary Card (Timeline View)
+
+The Reolink Summary Card provides a consolidated, timeline-based view of all your Reolink cameras. It automatically discovers all your `sensor.*_latest_recording` entities and sorts them by recency, featuring a "Hero" layout for the most recent event.
+
+1. Copy the `reolink-summary-card.js` file to your `www` directory
+2. Add it as a resource in your Lovelace configuration:
+   - Go to Settings → Dashboards → Resources
+   - Add `/local/reolink-summary-card.js` as a JavaScript module
+3. Add the card to your dashboard:
+
+```yaml
+type: custom:reolink-summary-card
+title: Recent Activity
+```
+
 Features:
-- Auto-refreshes camera snapshots with configurable interval
-- Built-in cache-busting to ensure fresh images (URLs already include timestamp parameters)
-- Configurable to use JPG images instead of GIFs for better performance
-- Clickable to open MP4 video in new tab
-- Shows camera state information and recording details
-- Customizable tap action
+- **Auto-Discovery**: Automatically detects all Reolink recording sensors in your system.
+- **Smart Sorting**: Always puts the most recent recording front and center as a "Hero" item.
+- **Timeline Layout**: Displays older recordings in a secondary grid below the hero.
+- **Relative Time**: Shows "3 minutes ago", "1 hour ago", etc. for quick context.
+- **Performance Optimized**: Uses `IntersectionObserver` to only refresh when the card is visible.
+- **Click to Play**: Tapping any recording opens the MP4 video in a new tab.
 
 ### Services
 
