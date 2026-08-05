@@ -70,13 +70,57 @@ class ReolinkSummaryCard extends HTMLElement {
     }
   }
 
+  _getServerTimeZone() {
+    // Pull timezone from HA runtime config — works for any installation
+    if (this._hass && this._hass.config && this._hass.config.timeZone) {
+      return this._hass.config.timeZone;
+    }
+    return null; // fallback to browser-local if unavailable
+  }
+
   _parseRecordingDate(dateStr, timeStr) {
     if (!dateStr || !timeStr) return new Date(0);
     try {
       const dateParts = dateStr.split('/');
       const timeParts = timeStr.split(':');
       if (dateParts.length === 3 && timeParts.length === 3) {
-        return new Date(dateParts[0], dateParts[1] - 1, dateParts[2], timeParts[0], timeParts[1], timeParts[2]);
+        const y = parseInt(dateParts[0], 10);
+        const mo = parseInt(dateParts[1], 10) - 1;
+        const d = parseInt(dateParts[2], 10);
+        const h = parseInt(timeParts[0], 10);
+        const mi = parseInt(timeParts[1], 10);
+        const s = parseInt(timeParts[2], 10);
+
+        const serverTZ = this._getServerTimeZone();
+
+        if (serverTZ) {
+          // Build a naive UTC instant from the recording's date/time components.
+          // This is timezone-independent — Date.UTC doesn't care about browser TZ.
+          const naive = new Date(Date.UTC(y, mo, d, h, mi, s));
+
+          // Get the server TZ offset at this instant (handles DST)
+          const fmt = new Intl.DateTimeFormat('en-US', {
+            timeZone: serverTZ,
+            timeZoneName: 'longOffset'
+          });
+          const parts = fmt.formatToParts(naive);
+          const tzPart = parts.find(p => p.type === 'timeZoneName');
+          let offsetMinutes = 0;
+          if (tzPart && tzPart.value) {
+            const m = tzPart.value.match(/GMT([+-])(\d{1,2})(?::(\d{2}))?/);
+            if (m) {
+              offsetMinutes = (parseInt(m[2], 10) * 60 + (m[3] ? parseInt(m[3], 10) : 0));
+              if (m[1] === '-') offsetMinutes = -offsetMinutes;
+            }
+          }
+
+          // The recording time is in server-local time.
+          // UTC = local - offset (e.g. Edmonton UTC-6: UTC = local - (-6h) = local + 6h)
+          return new Date(naive.getTime() - offsetMinutes * 60000);
+        } else {
+          // No server TZ — fall back to browser-local parse
+          return new Date(y, mo, d, h, mi, s);
+        }
       }
     } catch(e) {}
     return new Date(0); // fallback
@@ -198,14 +242,14 @@ class ReolinkSummaryCard extends HTMLElement {
             border-radius: 8px;
             overflow: hidden;
             cursor: pointer;
-            min-height: 200px;
+            aspect-ratio: 16/9;
             background: #000;
             box-shadow: 0 2px 4px rgba(0,0,0,0.2);
           }
           
           .secondary-grid {
             display: grid;
-            grid-template-columns: repeat(2, 1fr);
+            grid-template-columns: repeat(3, 1fr);
             gap: 12px;
           }
           
@@ -215,7 +259,7 @@ class ReolinkSummaryCard extends HTMLElement {
             border-radius: 6px;
             overflow: hidden;
             cursor: pointer;
-            min-height: 100px;
+            min-height: 80px;
             background: #222;
             opacity: 0.9;
             transition: opacity 0.2s;
