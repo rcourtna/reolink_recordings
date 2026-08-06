@@ -72,8 +72,8 @@ class ReolinkSummaryCard extends HTMLElement {
 
   _getServerTimeZone() {
     // Pull timezone from HA runtime config — works for any installation
-    if (this._hass && this._hass.config && this._hass.config.timeZone) {
-      return this._hass.config.timeZone;
+    if (this._hass && this._hass.config && this._hass.config.time_zone) {
+      return this._hass.config.time_zone;
     }
     return null; // fallback to browser-local if unavailable
   }
@@ -446,7 +446,8 @@ class ReolinkSummaryCard extends HTMLElement {
   }
 
   _timeSince(dateObj) {
-    const seconds = Math.floor((new Date() - dateObj) / 1000);
+    const now = new Date();
+    const seconds = Math.floor((now - dateObj) / 1000);
     let interval = seconds / 31536000;
     if (interval > 1) return Math.floor(interval) + " years ago";
     interval = seconds / 2592000;
@@ -538,7 +539,7 @@ class ReolinkSummaryCard extends HTMLElement {
       const liveBtnHtml = cameraEntity ? `
         <div class="live-btn" id="live-` + index + `" title="View Live Camera">
           <div class="live-icon"><svg viewBox="0 0 24 24"><path d="M17,10.5V7A1,1 0 0,0 16,6H4A1,1 0 0,0 3,7V17A1,1 0 0,0 4,18H16A1,1 0 0,0 17,17V13.5L21,17.5V6.5L17,10.5Z"/></svg></div>
-          <span>Live View</span>
+          <span>View Live</span>
         </div>` : '';
       
       const itemHtml = `
